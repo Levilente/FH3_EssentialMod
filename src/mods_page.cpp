@@ -75,10 +75,16 @@ void open_mods(void* page) {
 // From a HUD options page: raises the same "online_party_list" transition on it, which the state flow sends back to
 // the node (Mods pages replace each other).
 bool mods_fire(void* page) {
+    // The way the HUD page's own B fires "back" (game+0x14981A0): the state-flow manager (the pointer at
+    // game+0x4FAF130) gets a std::string with the transition's name through its vtable +0x08.
     char* base = game();
     if (!base || !page) return false;
     __try {
-        reinterpret_cast<Fire>(base + RVA_FIRE)(page, base + RVA_PARTY_ID, 0);
+        void* mgr = *reinterpret_cast<void**>(base + 0x4FAF130);
+        if (!mgr) return false;
+        alignas(16) char name[0x40] = {};
+        reinterpret_cast<void* (*)(void*, const char*)>(base + 0x304C60)(name, "online_party_list");
+        reinterpret_cast<void (*)(void*, void*)>((*static_cast<void***>(mgr))[1])(mgr, name);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
