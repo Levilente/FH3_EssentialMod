@@ -50,6 +50,8 @@ constexpr uint32_t kGameSizeOfImage = 0x05495000u; // FH3's forza_durango_releas
 // changes) were found in FH2 and are switched off here until they are found again in FH3. Hooks, logging,
 // crash reports, hotkeys, commands and the mods' own services still work.
 constexpr bool kGameFeatures = false;
+// Game database patches (database.cpp): gamedbRC.slt is plain SQLite on FH3, so mods' SQL works.
+constexpr bool kDatabase = true;
 // The mediaoverride and mediapc folders mounted over game:\media\ (media_overrides.cpp), ported to FH3.
 constexpr bool kMediaOverrides = true;
 // Copies n bytes, false if any of them can't be read or written; dst may then hold part of the copy,

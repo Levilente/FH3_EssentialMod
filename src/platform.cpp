@@ -572,7 +572,7 @@ void api_clear_sql(FH3Mod* m) {
 }
 
 void build_database() {
-    if (!kGameFeatures) return; // the game database isn't checked on FH3 yet (see platform.hpp)
+    if (!kDatabase) return;
     // Work from a snapshot, so mods can keep adding while it's built.
     std::vector<FH3Mod> snap;
     {
