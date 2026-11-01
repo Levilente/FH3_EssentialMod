@@ -1,0 +1,163 @@
+# Writing a mod
+
+This walks through making an FH2 mod on the platform, from an empty folder to a zip players can install. The example is [`examples/hello_mod`](../examples/hello_mod/hello_mod.cpp); copying it is a fine way to start.
+
+## What you need
+
+A mod is a 64-bit Windows DLL, written in anything that can export a C function. C++ is what the existing mods use, and the instructions here assume it.
+
+To build, you need either [llvm-mingw](https://github.com/mstorsjo/llvm-mingw/releases) with CMake, which works on Linux and Windows and is what every FH2 mod uses so far, or Visual Studio with CMake. If you plan to use `__try`/`__except` around reads of game memory, llvm-mingw needs `-fms-extensions`, and GCC-based MinGW won't do at all.
+
+To test, you need Forza Horizon 2 running through Azimuth. The platform writes text, file and database changes to the game's `mediaoverride` folder. [Forza Horizon 2 Extra Options](https://github.com/RokkuDayo/forzahorizon2_extraoptions) makes the game read it, and most players have it already. When Extra Options isn't loaded, platform 2.7.3 and newer makes the game read the folder itself.
+
+## Set up the project
+
+Add the platform to your repo as a submodule, so your build always has a platform to ship and the header to compile against:
+
+```bash
+git submodule add https://github.com/Trinculo54/FH2-Mod-Platform platform
+```
+
+Then in your `CMakeLists.txt`:
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(mymod VERSION 1.0.0 LANGUAGES C CXX RC)
+
+add_subdirectory(platform)   # gives you fh3mod_platform and fh3mod_api
+
+add_library(mymod SHARED src/mymod.cpp)
+target_link_libraries(mymod PRIVATE fh3mod_api)
+set_target_properties(mymod PROPERTIES OUTPUT_NAME MyMod PREFIX "")
+target_compile_definitions(mymod PRIVATE MYMOD_VERSION="${PROJECT_VERSION}")
+if(NOT MSVC)
+    target_link_options(mymod PRIVATE -static)   # no libc++/libunwind DLLs to ship
+endif()
+```
+
+`fh3mod_api` adds the include path for `fh3mod.h` and defines `FH3MOD_PLATFORM_VERSION` as the platform version in the submodule. Building gives you `MyMod.dll` and the platform's `d3dcompiler_47.dll`, plus, from platform 2.7.4, a copy of it named `DWrite.dll`.
+
+## The entry point
+
+Export `fh3mod_init`. The platform calls it once, right after loading your DLL, on its own thread and never under the Windows loader lock. That means you can load DLLs, create files and start threads from it, which you can't safely do from `DllMain`.
+
+```cpp
+#include "fh3mod.h"
+
+static const FH3ModApi* g_api;
+static FH3Mod* g_mod;
+
+FH3MOD_EXPORT int fh3mod_init(const FH3ModApi* api) {
+    g_api = api;
+    FH3ModInfo info{};
+    info.size             = sizeof info;
+    info.name             = "MyMod";
+    info.version          = MYMOD_VERSION;
+    info.github_repo      = "You/MyMod";            // or nullptr for no update checks
+    info.platform_version = FH3MOD_PLATFORM_VERSION;
+    info.check_updates    = 1;                      // let players turn this off in your settings
+    g_mod = api->register_mod(&info);
+    if (!g_mod) return 1;
+    // ... set things up ...
+    return 0;
+}
+```
+
+Keep `fh3mod_init` quick. Mods are initialised one after another, and the game's text is written out once all of them have returned, before the game reads it. Anything slow, like network requests, waiting for the game, or reading big files, goes on a thread you start yourself.
+
+A mod doesn't strictly need `DllMain` at all. If you have one, keep it to `DisableThreadLibraryCalls` and the like.
+
+## Changing the game's text
+
+Every piece of text in the game lives in a string table, and every string has a 16-bit key. [`string-tables.md`](string-tables.md) explains how to find the key you want. `scripts/dump_strings.py` lists a table's keys, their `IDS_...` names and their English text.
+
+There are two ways to change a string. `set_string(mod, "Main.str", key, L"text")` replaces one string by its key, in every language. `replace_string(mod, "AIPlayers.str", L"old", L"new")` replaces every string that is exactly `old`. That's useful for names, which are the same in every language but don't have keys you'd want to hard-code.
+
+Edits made inside `fh3mod_init` are written for you once every mod has started. The game reads its string tables once, early on, so later edits only show from the next launch. Call `apply_strings(mod)` after making them so they're saved for then. `clear_strings` takes yours back out, for example when a player turns a feature off.
+
+If two mods set the same key, the one loaded later wins, in alphabetical order of DLL name, and `platform.log` notes it. Replacements by text apply after key edits.
+
+## Title-screen notices
+
+`set_notice(mod, "line one\nline two")` puts lines under "PRESS (A) TO START" on the title screen, together with every other mod's. Players see it each time the game starts, so use it for things they need to know, not for status chatter. There's room for about 40 characters per line, and empty lines are dropped. `set_notice(mod, nullptr)` clears yours.
+
+You don't need it for updates: register with `github_repo` and the platform checks your latest GitHub release (at most every six hours, remembered between launches, and again straight away when a different version of your mod is installed) and adds "MyMod 1.1.0 is available" itself when it's newer than your `version`. It compares `x.y.z` numbers, with or without a leading `v`, so tag releases to match your version. It also adds "Old FH3 Mod Platform: reinstall MyMod" when the installed platform is older than your `platform_version`.
+
+From platform 2.8.0 (API 9), `add_title_entry` adds a line there with a button of its own, like "(Y) START ON STORM ISLAND", and calls your code when the player presses it. Your code can have the platform start the game straight after, and `title_started_by` then tells your mod that this start was its entry's. There are four buttons for every mod together, so add one entry at most. [`api.md`](api.md#title-screen-entries-api-9) has the details.
+
+## Replacing game files
+
+To swap out a whole file the game loads, such as a texture, an XML file or the Drivatar cache, use `set_file(mod, "drivatarglobalcache/DefaultCache.bin", data, size)` instead of writing into `mediaoverride` yourself. The path is relative to `media`, and a zip counts as a folder: `media\UI.zip\x.xml` is `"UI/x.xml"`. The platform makes sure only one mod replaces a given file and logs it when a second one tries. It also deletes the file once your mod stops claiming it, whether you call `clear_file` or the player removes your mod. Check the return value: 0 means you didn't get the file. These calls need API version 2, so check `api->api_version >= 2` first.
+
+## Changing the game database
+
+Most of the game's data, from car stats and prices to events and AI drivers, is in a SQLite database, `media\Stripped\gamedbRC.slt`. Open a copy in any SQLite browser to look around (`Data_Car` is a good place to start). Then change it with plain SQL:
+
+```cpp
+api->add_sql(g_mod, "UPDATE Data_Car SET BaseCost = BaseCost / 2");   // half-price Autoshow
+```
+
+Every mod's statements run against one copy of the database, in load order, so two mods can change different things in it, or even the same table, without either replacing the other's copy. If your SQL has an error, none of your changes are made and `platform.log` gives SQLite's error message. Use `UPDATE` and `INSERT` rather than dropping and recreating tables, so other mods' changes survive.
+
+## Working with other mods
+
+If your mod has something other mods could use, publish it. Write a small header with a struct of function pointers, starting with a `size` member, and call `publish_interface(mod, "MyMod.Thing", 1, &my_struct)` in `fh3mod_init`. Another mod includes your header, and then, on its own thread, waits with `wait_for_mods` and calls `get_interface("MyMod.Thing", 1)`. If it gets null, your mod isn't installed or is too old, and it should carry on without it. `mod_version("MyMod")` tells a mod whether another is installed at all.
+
+Once an interface is published, keep it working: add members at the end and bump the version, never change existing ones. WheresMyBuddy and FH2 Universal Radio both publish one: `WheresMyBuddy.Friends` and `FH3UniversalRadio.NowPlaying`.
+
+## When it crashes
+
+If the game crashes, look in `fh3-mods\crashes`. Each crash gets a text report, with the call stack and the mod it came from, plus a minidump to open in a debugger. When players report a crash, ask them for the text file.
+
+## Working with the game
+
+Azimuth maps the game, `forza_durango_release_final.exe`, into its own process when you press Play, so it isn't there yet when your mod starts. `wait_for_game(timeout)` blocks until it is and returns its base address; `game_base()` returns it right away, or null. Call `wait_for_game` from your own thread, not from `fh3mod_init`.
+
+Only one build of the game is in circulation: the Xbox One build from 24 November 2015. Addresses in it are fixed, so mods can use offsets from the base. Even so, check that the code or data you're about to change looks the way you expect before you patch it, and log and skip if it doesn't. A wrong guess is then a missing feature, not a crash. [`game-notes.md`](game-notes.md) lists what's known about the build, and the existing mods are worth reading. FH2 Universal Radio redirects calls inside the game's FMOD radio, WheresMyBuddy swaps a virtual function on a save-game class, and [WreckingBall](https://github.com/Trinculo54/WreckingBall) hooks seventeen functions in the game's collision, physics and rendering code, checking that each looks right before it does.
+
+Before hunting for an address yourself, look in [`include/fh3game.h`](../include/fh3game.h) (platform 2.8.0). It names the places in the game's code and data that mods already use, `FH3_GAME_COLLISIONWORLD_GETPOLYS` and the like, with what each one is, which mods use it, and, as `FH3_GAME_..._BYTES`, the bytes the game has there for your check. It's a plain C header with nothing to link; include it next to `fh3mod.h`. When you find a new one, add it by pull request, with the bytes read from the exe on disk.
+
+## Changing game code
+
+Hook through the platform (API 3) instead of patching memory yourself. `hook_function` detours a whole function, `hook_call` redirects one call instruction, and `hook_pointer` swaps a function pointer such as a vtable slot. The platform makes the patch, gives you the `original` to call on, and lets other mods hook the same code alongside you. It also refuses code that Extra Options has already changed, and lists your hooks in crash reports. [`api.md`](api.md#hooks-api-3) has the details and an example.
+
+Two rules matter. First, get the game's base from `wait_for_code`, not `wait_for_game`, before hooking game code, so Extra Options gets to patch first. It returns null when there's no FH2 to hook: Azimuth 1.0.1 can start other Forza games too, whose exes have the same name and address, and the platform refuses any hook into one of those ([`api.md`](api.md#game_base-and-wait_for_game)). Stop when it's null. Second, game code runs on many threads, so your detour can be called from any of them as soon as the hook is on. Set up everything it needs first, then call `enable_hooks`, and make the detour safe to run on several threads at once.
+
+If you can't use the platform's hooks for something (a patch in the middle of a function, say), still check the bytes are what you expect before you change them, and write them atomically.
+
+## Switches in the game
+
+If players will want to turn parts of your mod on and off, or tune a number, give them rows on the Mods page (API 4; sliders API 5): Pause > Settings > MODS, shared by every mod. You pass the current value and get told when the player changes it; you keep saving it in your own settings file, as before. Rows that only work after a restart are marked so, and the game then offers to restart for the player. From platform 2.8.0 (API 9) a row can also offer named choices, like a button or a mode, instead of a number standing for one. [`api.md`](api.md#the-mods-page-api-4-sliders-api-5) has the details and an example. Keep it to the main switches; fine-tuning still belongs in your ini.
+
+## Your own files
+
+Keep your settings, logs and other data in a folder of your own next to `azimuth.exe`, named after your mod, such as `MyMod\` or `mymod\`. The existing mods use `fh2-radio\` and `wheresmybuddy\`. `api->azimuth_dir` gives you that folder and `api->game_dir` the game's `Mount` folder. Don't put data in `fh3-mods`: anything in there ending in `.dll` gets loaded as a mod, and the platform keeps its own files there.
+
+## Shipping it
+
+A release zip, extracted into the Azimuth folder, should end up like this:
+
+```
+d3dcompiler_47.dll        the platform, from your build
+DWrite.dll                the same file, from your build (platform 2.7.4 and later)
+fh3-mods\MyMod.dll
+MyMod\...                 your data, if any
+```
+
+Always include the platform, under both names: Azimuth 1.0.3 only loads `DWrite.dll`, and Azimuth before 1.0.1 only `d3dcompiler_47.dll`. Since 2.2 the platform has MinHook built in, which is under the BSD 2-Clause license, so include `LICENSE-MinHook.txt` from the platform's `dist` folder in your zip too. A player who only installs your mod needs it, and the version checks take care of an older copy getting put back. A short `README.txt` that says where things go and where your log is will save you a lot of questions.
+
+Before releasing, start the game with only your mod and check `fh3-mods\platform.log`. It should show your DLL loaded with its version, your `registered` line, and the tables, files and database changes you made. Then try it next to the other mods.
+
+Put a version in your DLL's file properties (a `VERSIONINFO` resource) as well. The platform logs it next to the file name, and players can see it under Properties → Details. Both existing mods generate theirs from the CMake project version; see `src/version.rc` and `cmake/version.h.in` in either repo.
+
+## Etiquette
+
+A few things keep mods from tripping over each other:
+
+- **Don't proxy DLLs yourself.** `d3dcompiler_47.dll` and `DWrite.dll` are the platform's and `winmm.dll` is Extra Options'. If you need to load early, the platform is already as early as it gets.
+- **Hook through the platform.** Your own copy of MinHook, or your own byte patches, can't see other mods' hooks, and the platform can't warn about clashes with them.
+- **Don't write into the game's own files.** Use the string-table, file and database functions, so that removing your mod puts everything back.
+- **Make your features switchable.** Give each one a setting, and when it's off, undo what you did, for example with `clear_strings`.
+- **Mind online play.** If your mod changes driving or what other players would see, set `offline_only` in your `FH3ModInfo` (platform 2.8.0), so it isn't loaded when the game is started from the FH2MP launcher, or check `playing_online()` and turn just that part off. [`api.md`](api.md#online-play-api-9) explains both.
+- **Don't take ages to start.** Do your setup on your own threads.
+- **Log what you change.** It's how people debug, you included.

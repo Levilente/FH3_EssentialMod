@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Cross-compiles the FH3 Mod Platform with llvm-mingw and stages dist/:
+#   dist/d3dcompiler_47.dll      the platform (next to azimuth.exe)
+#   dist/DWrite.dll              the same file, for Azimuth 1.0.1 and later
+#   dist/examples/HelloMod.dll   the example mod (not for players)
+#   dist/include/fh3mod.h        the API header
+#   dist/include/fh3game.h       names for the game addresses mods use
+#   dist/tools/fh3mod.exe        runs mods' commands in the running game
+#   dist/README.txt, dist/LICENSE.txt, dist/LICENSE-MinHook.txt
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+for d in /opt/llvm-mingw/bin /usr/local/llvm-mingw/bin; do [ -d "$d" ] && PATH=$d:$PATH; done
+cmake -S "$root" -B "$root/build" -DCMAKE_TOOLCHAIN_FILE="$root/cmake/mingw-w64-x86_64.cmake" -DCMAKE_BUILD_TYPE=Release
+cmake --build "$root/build" -j "${JOBS:-$(nproc)}"
+rm -rf "$root/dist"
+mkdir -p "$root/dist/examples" "$root/dist/include"
+cp "$root/build/d3dcompiler_47.dll" "$root/build/DWrite.dll" "$root/dist/"
+cp "$root/build/HelloMod.dll" "$root/dist/examples/"
+mkdir -p "$root/dist/tools"
+cp "$root/build/fh3mod.exe" "$root/dist/tools/"
+cp "$root/include/fh3mod.h" "$root/include/fh3game.h" "$root/dist/include/"
+cp "$root/scripts/dist-readme.txt" "$root/dist/README.txt"
+cp "$root/LICENSE" "$root/dist/LICENSE.txt"
+cp "$root/third_party/minhook/LICENSE.txt" "$root/dist/LICENSE-MinHook.txt"
+(cd "$root/dist" && find . -type f -printf '  %P\n')
