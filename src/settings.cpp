@@ -870,7 +870,7 @@ std::string read_ui(const char* name) {
 // code here expects it after the list (FH2's layout). It's moved there, with LastChildFill off so the docking
 // (list left, panel right) stays as the game laid it out.
 std::string read_hud_options() {
-    std::string page = read_hud_options();
+    std::string page = read_ui("Scenes/Anthem/A_HUDOptions.xaml");
     const std::size_t dp = page.find("Style=\"{StaticResource A_Style_DescriptionPanel}\"");
     const std::size_t lb = page.find("<local:CommonListBox");
     if (dp == std::string::npos || lb == std::string::npos || dp > lb) return page;
