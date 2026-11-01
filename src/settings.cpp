@@ -971,26 +971,19 @@ std::string slider_resources(const Row& r, std::size_t i) {
            "                                <local:FZTextBlock x:Name=\"PART_Label\" Text=\"{Binding Tag.Heading, RelativeSource={RelativeSource TemplatedParent}}\" "
            "Style=\"{StaticResource A_Style_SliderControlText}\" HorizontalAlignment=\"Left\" />\r\n"
            "                                <DockPanel Grid.Column=\"1\">\r\n"
-           "                                    <local:FZTextBlock DockPanel.Dock=\"Right\" Width=\"64\" TextAlignment=\"Right\" HorizontalAlignment=\"Right\" "
-           "Text=\"{Binding Value, RelativeSource={RelativeSource TemplatedParent}, " +
+           "                                    <local:FZTextBlock Text=\"{Binding Value, RelativeSource={RelativeSource TemplatedParent}, " +
            (percent ? std::string("ConverterParameter=fracpercentage, ") : std::string()) + "Converter={StaticResource FH3Mod_Num_" + n +
-           "}}\" Style=\"{StaticResource A_Style_SliderControlText}\" />\r\n"
-           "                                    <Grid Margin=\"32, 0, 8, 0\" Height=\"22\">\r\n"
-           "                                        <local:FZMaterial x:Name=\"PART_SliderMaterial\" Color=\"{StaticResource A_Color_MediumGreyText}\" />\r\n"
-           "                                        <Track x:Name=\"PART_Track\">\r\n"
-           "                                            <Track.DecreaseRepeatButton>\r\n"
-           "                                                <RepeatButton x:Name=\"Left\" Style=\"{StaticResource A_Style_RepeatButton_Left_Unfocused}\"/>\r\n"
-           "                                            </Track.DecreaseRepeatButton>\r\n"
+           "}}\" Style=\"{StaticResource A_Style_SliderControlText_Value}\" />\r\n"
+           "                                    <Grid>\r\n"
+           "                                        <local:FZMaterial x:Name=\"MouseHitHelper\" Style=\"{StaticResource A_Style_FZMaterial_OptionsSlider_MouseHitHelper}\" />\r\n"
+           "                                        <Track x:Name=\"PART_Track\" Style=\"{StaticResource A_Style_Track_OptionsSlider}\">\r\n"
+           "                                            <Track.DecreaseRepeatButton><RepeatButton x:Name=\"Left\" Style=\"{StaticResource A_Style_RepeatButton_Left}\" /></Track.DecreaseRepeatButton>\r\n"
+           "                                            <Track.IncreaseRepeatButton><RepeatButton x:Name=\"Right\" Style=\"{StaticResource A_Style_RepeatButton_Right}\" /></Track.IncreaseRepeatButton>\r\n"
+           "                                            <Track.Thumb><Thumb x:Name=\"Thumb\" Style=\"{StaticResource A_Style_Thumb_OptionsSlider}\" /></Track.Thumb>\r\n"
            "                                        </Track>\r\n"
            "                                    </Grid>\r\n"
            "                                </DockPanel>\r\n"
            "                            </Grid>\r\n"
-           "                            <ControlTemplate.Triggers>\r\n"
-           "                                <DataTrigger Binding=\"{Binding RelativeSource={RelativeSource Mode=FindAncestor, AncestorType=ListBoxItem}, Path=IsKeyboardFocusWithin}\" Value=\"True\">\r\n"
-           "                                    <Setter TargetName=\"PART_SliderMaterial\" Property=\"Color\" Value=\"{StaticResource A_Color_Header_Background}\"/>\r\n"
-           "                                    <Setter TargetName=\"Left\" Property=\"Style\" Value=\"{StaticResource A_Style_RepeatButton_Left_Focused}\"/>\r\n"
-           "                                </DataTrigger>\r\n"
-           "                            </ControlTemplate.Triggers>\r\n"
            "                        </ControlTemplate>\r\n"
            "                    </Setter.Value>\r\n"
            "                </Setter>\r\n"
@@ -2035,15 +2028,6 @@ std::vector<PageItem> about_items() {
     items.push_back(platform);
     urls.push_back(std::string("https://") + kPlatformGitHub);
 
-    const std::string eo = extra_options_line();
-    PageItem extra = info("Extra Options", eo.empty() ? "Forza Horizon 2 Extra Options isn't installed. Some mods need it."
-                                                      : "Forza Horizon 2 Extra Options is installed. Its own options are on the "
-                                                        "game's settings pages.");
-    extra.value = eo.empty() ? "Not installed" : "Installed";
-    if (!eo.empty() && eo != "Installed") extra.version = eo;
-    items.push_back(extra);
-    urls.push_back("");
-
     const std::string folder = mods_folder();
     PageItem open = info("Open mods folder", "Opens fh3-mods in File Explorer, to add, remove or swap mods. Mods you add there "
                                              "load the next time you start the game.");
@@ -2058,8 +2042,8 @@ std::vector<PageItem> about_items() {
     items.push_back(report);
     urls.push_back(std::string("https://") + kPlatformGitHub + "/issues");
 
-    PageItem credits = info("Credits", "FH3 Mod Platform is made by Trinculo54. Press A to open their GitHub page.");
-    credits.value = "Trinculo54";
+    PageItem credits = info("Credits", "FH3 mod platform by Levilente, based on the FH2 mod platform by Trinculo54. Press A to open the FH2 platform's GitHub page.");
+    credits.value = "Levilente, @Trinculo54";
     credits.link  = kAuthorGitHub;
     items.push_back(credits);
     urls.push_back(std::string("https://") + kAuthorGitHub);
