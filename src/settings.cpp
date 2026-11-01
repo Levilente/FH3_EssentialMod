@@ -865,6 +865,37 @@ std::string read_ui(const char* name) {
     return std::string(x.begin(), x.end());
 }
 
+
+// FH3's A_HUDOptions.xaml puts the description panel before the list in a DockPanel (docked right); the page
+// code here expects it after the list (FH2's layout). It's moved there, with LastChildFill off so the docking
+// (list left, panel right) stays as the game laid it out.
+std::string read_hud_options() {
+    std::string page = read_hud_options();
+    const std::size_t dp = page.find("Style=\"{StaticResource A_Style_DescriptionPanel}\"");
+    const std::size_t lb = page.find("<local:CommonListBox");
+    if (dp == std::string::npos || lb == std::string::npos || dp > lb) return page;
+    const std::size_t d0 = page.rfind("<ContentControl", dp), d1 = page.find("/>", dp);
+    const std::size_t le = page.find("</local:CommonListBox>", lb);
+    const std::size_t ge = le == std::string::npos ? le : page.find("</Grid>", le);
+    const std::size_t dk = page.rfind("<DockPanel", d0);
+    if (d0 == std::string::npos || d1 == std::string::npos || ge == std::string::npos || dk == std::string::npos) return page;
+    const std::string panel = page.substr(d0, d1 + 2 - d0);
+    page.insert(ge + 7, "\r\n\r\n                                " + panel);
+    page.erase(d0, d1 + 2 - d0);
+    page.insert(dk + 10, " LastChildFill=\"False\"");
+    // FH2's page has the title, list and panel in a StackPanel named BasicOptions, followed by a
+    // </ContentControl>; FH3's is unnamed with nothing after it. Named here, with an empty
+    // ContentControl after it, so the code that finds its end (the restart notice, the views'
+    // animation) finds the same thing.
+    const std::size_t dock_end = page.find("</DockPanel>", dk);
+    const std::size_t sp_end   = dock_end == std::string::npos ? dock_end : page.find("</StackPanel>", dock_end);
+    const std::size_t sp0      = page.rfind("<StackPanel Orientation=\"Vertical\"", dk);
+    if (sp_end == std::string::npos || sp0 == std::string::npos) return page;
+    page.insert(sp_end + 13, "\r\n                            <ContentControl Visibility=\"Collapsed\"></ContentControl>");
+    page.insert(sp0 + 11, " Name=\"BasicOptions\"");
+    return page;
+}
+
 // Replaces what's between `open` (or the end of its tag) and `close`.
 bool replace_between(std::string& s, const std::string& open, const std::string& close, const std::string& with,
                      bool after_tag) {
@@ -1176,7 +1207,7 @@ void erase_attr(std::string& el, const std::string& name) {
 bool write_list_page(const char* file, const std::string& title, const std::vector<PageItem>& items, bool track_selection = false,
                      const std::vector<std::vector<PageItem>>* views = nullptr, const std::vector<ViewTitle>* view_titles = nullptr,
                      const char* a_help = "{local:Loc HelpButtons.IDS_Select}") {
-    std::string page = read_ui("Scenes/Anthem/A_HUDOptions.xaml");
+    std::string page = read_hud_options();
     if (page.empty()) return false;
     std::string res = "\r\n            <local:FZBooleanToVisibilityConverter x:Key=\"FH3Mod_ShowNotice\" UseHidden=\"true\" InvertResult=\"false\" />\r\n"
                       "            <local:FZBooleanToVisibilityConverter x:Key=\"FH3Mod_ShowView\" UseHidden=\"false\" InvertResult=\"false\" />\r\n"
@@ -1530,7 +1561,7 @@ bool write_list_page(const char* file, const std::string& title, const std::vect
 // BasicOptions panel (title, list and description); its resources go into the page's, after
 // the platform's converters; its help, if any, takes the place of DefaultHelpPanel.
 bool write_custom_page(const char* file, const std::string& resources, const std::string& content, const std::string& help) {
-    std::string page = read_ui("Scenes/Anthem/A_HUDOptions.xaml");
+    std::string page = read_hud_options();
     if (page.empty()) return false;
     const std::string res = "\r\n            <local:FZBooleanToVisibilityConverter x:Key=\"FH3Mod_ShowIf\" UseHidden=\"false\" InvertResult=\"false\" />\r\n"
                             "            <local:FZBooleanToVisibilityConverter x:Key=\"FH3Mod_ShowIfHidden\" UseHidden=\"true\" InvertResult=\"false\" />\r\n"
