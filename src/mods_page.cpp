@@ -52,7 +52,13 @@ void once(const std::string& line) {
 
 bool is_mods_tile(const void* name) {
     char* base = game();
-    return base && name == *reinterpret_cast<const void* const*>(base + RVA_NAME);
+    if (!base) return false;
+    if (name == *reinterpret_cast<const void* const*>(base + RVA_NAME)) return true;
+    // the MODS tab's tiles (the Marketplace pack tiles), by their literal names in the exe
+    static const uint32_t kTabNames[] = {0x2f34aa0, 0x2f34a28, 0x2f34a10, 0x2f34a48, 0x2f34a88};
+    for (uint32_t r : kTabNames)
+        if (name == base + r) return true;
+    return false;
 }
 std::atomic<void*> g_home{nullptr};   // the Home tab page the MODS tile was pressed on
 std::atomic<int> g_reopen{0};          // a Mods page to open as soon as the Home tab is back (see mods_reopen)
@@ -101,6 +107,18 @@ void mods_reopen(int which) {
 }
 
 namespace {
+void open_hub(void* page, int which) {
+    char* base = game();
+    if (!base || !page) return;
+    g_home = page;
+    settings_hub_open(which);
+    reinterpret_cast<Fire>(base + RVA_FIRE)(page, base + RVA_PARTY_ID, 0);
+}
+void tab_installed(void* page) { open_hub(page, 1); }
+void tab_updates(void* page) { open_hub(page, 2); }
+void tab_about(void* page) { open_hub(page, 4); }
+void tab_all(void* page) { open_hub(page, 6); }
+void tab_get(void*) {}  // no website yet
 void handler_a(void* page) { open_mods(page); }
 void handler_b(void* page, int) { open_mods(page); }
 
@@ -288,6 +306,11 @@ void start_mods_page() {
         hook_game_function(RVA_SET_STATE_B, reinterpret_cast<void*>(&set_state_b), "the tile lock setter", reinterpret_cast<void**>(&g_set_b));
         hook_game_function(RVA_SAVE, reinterpret_cast<void*>(&save_detour), "the game's save", reinterpret_cast<void**>(&g_save));
         hook_game_function(RVA_WIRE, reinterpret_cast<void*>(&wire), "the Home tab's tile wiring", reinterpret_cast<void**>(&g_wire));
+        hook_game_function(0x1579B50, reinterpret_cast<void*>(&tab_installed), "the MODS tab: Installed mods");
+        hook_game_function(0x1579E80, reinterpret_cast<void*>(&tab_updates), "the MODS tab: Updates");
+        hook_game_function(0x157B360, reinterpret_cast<void*>(&tab_about), "the MODS tab: About");
+        hook_game_function(0x1579EC0, reinterpret_cast<void*>(&tab_get), "the MODS tab: Get Mods");
+        hook_game_function(0x157A030, reinterpret_cast<void*>(&tab_all), "the MODS tab: All settings");
         hook_game_function(RVA_HANDLER_A, reinterpret_cast<void*>(&handler_a), "the Horizon Group tile's click handler");
         hook_game_function(RVA_HANDLER_B, reinterpret_cast<void*>(&handler_b), "the Horizon Group tile's second handler");
     }).detach();

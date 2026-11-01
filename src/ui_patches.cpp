@@ -273,6 +273,23 @@ std::string pause_menu(std::string xaml, std::string& report) {
     // Pressing it is taken over in mods_page.cpp; what it opens is set by the state-flow patch below.
     step("mods-tile", patch_tile(xaml, "PART_Button_GameParty", {{kTileState, "Enabled"}}));
     step("mods-title", patch_element(xaml, "x:Key=\"A_MenuDataItem_GameParty\"", {{"Heading", "MODS"}}));
+    // The Marketplace tab becomes the MODS tab: five tiles (the game's pack tiles, renamed), the rest hidden.
+    {
+        const std::string t = "Content=\"{local:Loc PauseMenu.IDS_CatTitle_Marketplace}\"";
+        const std::size_t at = xaml.find(t);
+        if (at != std::string::npos) xaml.replace(at, t.size(), "Content=\"MODS\"");
+        step("mods-tab-title", at != std::string::npos);
+    }
+    step("m-installed", patch_element(xaml, "x:Key=\"A_MenuDataItem_CarPacks\"", {{"Heading", "Installed mods"}}));
+    step("m-updates", patch_element(xaml, "x:Key=\"A_MenuDataItem_ExpansionPacks\"", {{"Heading", "Updates"}}));
+    step("m-about", patch_element(xaml, "x:Key=\"A_MenuDataItem_SeasonPass\"", {{"Heading", "About"}}));
+    step("m-get", patch_element(xaml, "x:Key=\"A_MenuDataItem_ExpansionPass\"", {{"Heading", "Get Mods"}}));
+    step("m-all", patch_element(xaml, "x:Key=\"A_MenuDataItem_Extras\"", {{"Heading", "All settings"}}));
+    step("m-all-pos", patch_tile(xaml, "PART_Button_Extras", {{kGridX, "4"}}));
+    step("m-hide1", patch_tile(xaml, "PART_Button_MarketplaceFeatured", {{kTileState, "Hidden"}}));
+    step("m-hide2", patch_tile(xaml, "PART_Button_Marketplace_Infographic2", {{kTileState, "Hidden"}}));
+    step("m-hide3", patch_tile(xaml, "PART_Button_VIPMembership", {{kTileState, "Hidden"}}));
+    step("m-hide4", patch_tile(xaml, "PART_Button_Marketplace_Infographic3", {{kTileState, "Hidden"}}));
     return xaml;
 }
 
