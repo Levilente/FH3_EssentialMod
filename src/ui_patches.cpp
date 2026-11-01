@@ -287,7 +287,14 @@ std::string pause_flow(std::string xml, std::string& report) {
     // the Mods page's own XAML.
     xml.replace(at, std::strlen(old_node),
                 "<node id=\"online_party_list\" state=\"ui_screens.show_hud_options\">\n"
-                "      <exit id=\"online_party_list\" target=\"online_party_list\" />");
+                "      <exit id=\"online_party_list\" target=\"fh3mp_mods_bounce\" />");
+    {
+        // (the page replaces itself through a node in between: a transition to the node it's in does nothing)
+        const std::size_t n2 = xml.find("<node id=\"online_party_list\"");
+        xml.insert(n2,
+                   "<node id=\"fh3mp_mods_bounce\" state=\"global.add_sticky\" name=\"FH3MPBounce\" type=\"string\" data=\"1\">\n"
+                   "      <exit target=\"online_party_list\" />\n    </node>\n\n    ");
+    }
     report += " +mods-page";
     // Exit to Desktop, after Yes: the placeholder page as a "saving" screen (A_PlaceholderTextScene below shows a
     // spinner for this text), the game's own blocking save, then the same page again, waiting for A on a loop, so

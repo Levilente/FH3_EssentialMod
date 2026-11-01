@@ -3009,6 +3009,7 @@ void d_hud_page_loaded(void* page) {
     // Which page this is, before the page's own "loaded" (which focuses FirstItem, and so may set
     // a slot through a binding) runs: from then on, callbacks and focusing go to this page.
     const int was_shown = g_hub_shown.exchange(0);
+    if (was_shown) slog("HUD page shown for hub page " + std::to_string(was_shown));
     if (was_shown == kHubUpdates) {
         g_updates_page = page;
         g_selected     = 0;
@@ -3178,8 +3179,8 @@ bool d_hud_page_button(void* page, int button, bool pressed) {
     if (page && page == g_modpage.load() && (button == kButtonA || button == kButtonB)) {
         if (button == kButtonB && pressed) {   // back to Installed mods, the same way the page was opened
             play_sound(kSoundBack, RVA_BACK_SOUNDS);
-            open_hub_page(nullptr, kHubInstalled);
-            if (!mods_fire(page)) return o_hud_page_button(page, button, pressed);
+            mods_reopen(kHubInstalled);
+            return o_hud_page_button(page, button, pressed);   // leaves; the Home tab then opens the list again
         }
         return true;   // A on a row is the row's own; neither leaves the page
     }
@@ -3237,8 +3238,8 @@ bool d_hud_page_button(void* page, int button, bool pressed) {
             if (view == 0) {
                 const int n = g_selected.load();
                 if (n >= 0 && static_cast<std::size_t>(n) < g_entries.size() && static_cast<std::size_t>(n) < kMaxModPages) {
-                    open_hub_page(nullptr, kHubModPage + n);   // the mod's settings, as a page of their own
-                    if (!mods_fire(page)) slog("couldn't open the mod's page");
+                    mods_reopen(kHubModPage + n);   // the mod's settings, as a page of their own: leave, and come back to it
+                    return o_hud_page_button(page, kButtonB, true);
                 }
             } else if (button == kButtonB) {
                 switch_view(page, 0, true, 0);   // B (Back): done with this mod; A does nothing on a settings list

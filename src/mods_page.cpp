@@ -54,9 +54,19 @@ bool is_mods_tile(const void* name) {
     char* base = game();
     return base && name == *reinterpret_cast<const void* const*>(base + RVA_NAME);
 }
+std::atomic<int> g_reopen{0};          // a Mods page to open as soon as the Home tab is back (see mods_reopen)
+std::atomic<uint64_t> g_reopen_at{0};
+void open_mods(void* page);
 void set_state_a(void* page, const void* name, int state) {
     if (is_mods_tile(name)) state = 0;
     g_set_a(page, name, state);
+    if (g_reopen.load() && is_mods_tile(name) && GetTickCount64() >= g_reopen_at.load()) {
+        const int which = g_reopen.exchange(0);
+        if (which && settings_hub_open(which)) {
+            char* base = game();
+            if (base) reinterpret_cast<Fire>(base + RVA_FIRE)(page, base + RVA_PARTY_ID, 0);
+        }
+    }
 }
 void set_state_b(void* page, const void* name, int reason) {
     if (is_mods_tile(name)) return;
@@ -72,23 +82,11 @@ void open_mods(void* page) {
 }
 }  // namespace
 
-// From a HUD options page: raises the same "online_party_list" transition on it, which the state flow sends back to
-// the node (Mods pages replace each other).
-bool mods_fire(void* page) {
-    // The way the HUD page's own B fires "back" (game+0x14981A0): the state-flow manager (the pointer at
-    // game+0x4FAF130) gets a std::string with the transition's name through its vtable +0x08.
-    char* base = game();
-    if (!base || !page) return false;
-    __try {
-        void* mgr = *reinterpret_cast<void**>(base + 0x4FAF130);
-        if (!mgr) return false;
-        alignas(16) char name[0x40] = {};
-        reinterpret_cast<void* (*)(void*, const char*)>(base + 0x304C60)(name, "online_party_list");
-        reinterpret_cast<void (*)(void*, void*)>((*static_cast<void***>(mgr))[1])(mgr, name);
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
+// From a Mods page: leave it (the caller does, with the game's own back) and open `which` as soon as the Home tab
+// is back and sets its tiles.
+void mods_reopen(int which) {
+    g_reopen_at = GetTickCount64() + 250;
+    g_reopen    = which;
 }
 
 namespace {

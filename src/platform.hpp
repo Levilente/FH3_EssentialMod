@@ -138,7 +138,7 @@ int title_add(FH3Mod* mod, const FH3TitleEntry* entry);
 const char* title_started_by(FH3Mod* mod);
 // After every fh3mod_init: writes the pages and hooks the game if any mod added a row.
 bool settings_hub_open(int which);
-bool mods_fire(void* page);
+void mods_reopen(int which);
 void settings_start(const FH3ModApi* api);
 
 // The MODS tab (platform 2.5.0): every mod in fh3-mods, loaded or turned off there.
