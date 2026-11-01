@@ -2932,6 +2932,13 @@ void switch_view(void* page, int k, bool back, int row) {
     slog(std::string("switch_view: obj ") + (g_view_obj.load() ? "set" : "NULL") + ", desc old " + (g_view_desc[old] ? "set" : "null") + ", new " + (g_view_desc[k] ? "set" : "null"));
     notify_view(old);
     notify_view(k);
+    if (page && page != g_view_obj.load()) {   // diagnostics: is the getter's object not the page?
+        slog("switch_view: page " + std::to_string(reinterpret_cast<uintptr_t>(page)) + " vs getter obj " +
+             std::to_string(reinterpret_cast<uintptr_t>(g_view_obj.load())) + ": notifying on the page too");
+        for (int j : {old, k})
+            for (uint8_t* d : {g_view_desc[j], g_view_in_desc[j], g_view_back_desc[j]})
+                if (d) notify_changed(page, d);
+    }
     if (void* obj = g_view_obj.load())
         for (uint8_t* d : g_bar_desc)
             if (d) notify_changed(obj, d);
@@ -3222,8 +3229,8 @@ bool d_hud_page_button(void* page, int button, bool pressed) {
             if (view == 0) {
                 const int n = g_selected.load();
                 if (n >= 0 && static_cast<std::size_t>(n) < g_entries.size() && static_cast<std::size_t>(n) < kMaxModPages) {
-                    mods_reopen(kHubModPage + n);   // the mod's settings, as a page of their own: leave, and come back to it
-                    return o_hud_page_button(page, kButtonB, true);
+                    switch_view(page, n + 1, false, 0);   // the mod's settings, in this page
+                    return true;
                 }
             } else if (button == kButtonB) {
                 switch_view(page, 0, true, 0);   // B (Back): done with this mod; A does nothing on a settings list
