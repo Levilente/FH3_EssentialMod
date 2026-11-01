@@ -210,15 +210,16 @@ std::string current_values() {
 }
 
 // ---- property descriptors -----------------------------------------------------------------
-constexpr uintptr_t RVA_FIND_PROPERTY   = 0x157FF60;   // AVUI::Type::FindProperty(type, name)
-constexpr uintptr_t RVA_OBJECT_CTOR     = 0x143EB80;   // AVUI::Object::Object(this)
-constexpr uintptr_t RVA_BOX_INT         = 0x04702D0;   // ObjectPtr* box(ObjectPtr* out, const int*)
-constexpr uintptr_t RVA_BOX_BOOL        = 0x0336BA0;   // ObjectPtr* box(ObjectPtr* out, const bool*)
-constexpr uintptr_t RVA_BOOL_TYPE       = 0x15C9550;   // the bool type, (0)
-constexpr uintptr_t RVA_NOTIFY_PROP     = 0x0CF9C60;   // raise PropertyChanged(obj, desc)
-constexpr uintptr_t RVA_MODEL_PROPERTY  = 0x0D58660;   // the HUD page's EnableDrivatarLiveries descriptor
-constexpr uintptr_t RVA_FLOAT_PROPERTY  = 0x0ED6E90;   // a float property's descriptor, for sliders
-constexpr uintptr_t RVA_BOX_FLOAT       = 0x03F5990;   // ObjectPtr* box(ObjectPtr* out, const float*)
+// FH3 (5 Jun 2018 exe); the FH2 addresses these replace are in docs/mods-page-fh3-map.md
+constexpr uintptr_t RVA_FIND_PROPERTY   = 0x200C1D0;   // AVUI::Type::FindProperty(type, name)
+constexpr uintptr_t RVA_OBJECT_CTOR     = 0x1F6E7C0;   // AVUI::Object::Object(this)
+constexpr uintptr_t RVA_BOX_INT         = 0x05592B0;   // ObjectPtr* box(ObjectPtr* out, const int*)
+constexpr uintptr_t RVA_BOX_BOOL        = 0x05592D0;   // ObjectPtr* box(ObjectPtr* out, const bool*)
+constexpr uintptr_t RVA_BOOL_TYPE       = 0x1F5F000;   // the bool type, (0)
+constexpr uintptr_t RVA_NOTIFY_PROP     = 0x056D4F0;   // raise PropertyChanged(obj, desc)
+constexpr uintptr_t RVA_MODEL_PROPERTY  = 0x14FD740;   // the HUD page's EnableDrivatarLiveries descriptor
+constexpr uintptr_t RVA_FLOAT_PROPERTY  = 0x1712650;   // a float property's descriptor (Gamma), for sliders
+constexpr uintptr_t RVA_BOX_FLOAT       = 0x0495110;   // ObjectPtr* box(ObjectPtr* out, const float*)
 using BoxIntFn    = void** (*)(void** out, const int* value);
 using BoxBoolFn   = void** (*)(void** out, const bool* value);
 using BoxFloatFn  = void** (*)(void** out, const float* value);
@@ -236,7 +237,7 @@ uint8_t* g_notice_desc = nullptr;    // FH3Mod_RestartNotice
 // Sliders copy a float property instead.
 uint8_t* new_descriptor(const char* name, void* getter, void* setter, void* type, uintptr_t model_rva = RVA_MODEL_PROPERTY) {
     uint8_t* model = reinterpret_cast<AccessorFn>(g_base + model_rva)();
-    if (!model || !readable(model, 0x58)) return nullptr;
+    if (!model || !readable(model, 0x60)) return nullptr;
     auto* d = static_cast<uint8_t*>(VirtualAlloc(nullptr, 0x1000, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
     if (!d) return nullptr;
     reinterpret_cast<ObjectCtorFn>(g_base + RVA_OBJECT_CTOR)(d);
@@ -250,7 +251,8 @@ uint8_t* new_descriptor(const char* name, void* getter, void* setter, void* type
         *reinterpret_cast<void**>(d + 0x48) = type;
     else
         std::memcpy(d + 0x48, model + 0x48, 8);
-    d[0x50] = model[0x50];
+    std::memcpy(d + 0x50, model + 0x50, 8);   // FH3: the owner type
+    d[0x58] = model[0x58];                     // FH3: the flags (FH2 +0x50)
     return d;
 }
 
@@ -2360,7 +2362,8 @@ bool write_pause_flow() {
 constexpr uintptr_t RVA_PAUSE_WIRE_TILES = 0x0DC8A60;   // PauseOptionsMenu: wire the tiles (page)
 constexpr uintptr_t RVA_WIRE_BUTTON      = 0x0D9FC10;   // (page, const char* name, const Pmf*)
 constexpr uintptr_t RVA_HUD_TILE         = 0x0DC6C40;   // PauseOptionsMenu::OnHud(page)
-constexpr uintptr_t RVA_HUD_SCENE_RECORD = 0x0B3A3E0;   // SceneRecord* build(SceneRecord* out)
+constexpr uintptr_t RVA_HUD_SCENE_RECORD = 0x1182CB0;   // FH3 (FH2 0x0B3A3E0)
+//   // SceneRecord* build(SceneRecord* out)
 constexpr uintptr_t RVA_PAUSE_NAV_SIZE   = 0x0DC873E;   // mov [rbp+0x40], 2; mov [rbp+0x48], 5
 
 struct Pmf {
@@ -2479,7 +2482,7 @@ constexpr uintptr_t RVA_SHOW_POPUP     = 0x0D09D00;   // Popup* (page, LocRef* t
 constexpr uintptr_t RVA_POPUP_HELP     = 0x0DD8820;   // (popup, int layout)
 constexpr uintptr_t RVA_POPUP_HANDLER  = 0x0DD86F0;   // (popup, int event, std::function<void()>, bool)
 constexpr uintptr_t RVA_POPUP_SELECTED = 0x0E01A60;   // Item* (popup)
-constexpr uintptr_t RVA_OBJECT_FREE    = 0x0257730;   // when an AVUI object's refcount reaches 0
+constexpr uintptr_t RVA_OBJECT_FREE    = 0x031EB20;   // when an AVUI object's refcount reaches 0
 constexpr uintptr_t RVA_SOME_TYPEINFO  = 0x0D0FBC0;   // a game lambda's _Target_type, for ours
 
 struct FakeLocString {
@@ -2759,7 +2762,7 @@ void open_hub_page(void* page, int which) {
     g_view       = 0;   // before the page's bindings first read it
     g_view_back  = false;
     hub_ask(which);
-    o_car_packs(page);
+    if (o_car_packs && page) o_car_packs(page);   // FH2: the Car Packs tile fires the page; FH3: the caller does
 }
 // The menus' sounds, played as the HUD page plays SubMenuOpen when it's shown (0x140C7AD40):
 // a std::string of the sound's name, made with the game's own assign (0x14022C300) and handed
@@ -2768,8 +2771,8 @@ void open_hub_page(void* page, int which) {
 constexpr uintptr_t RVA_UI_SOUNDS      = 0x365A298;
 constexpr uintptr_t RVA_STRING_ASSIGN  = 0x022C300;   // std::string::assign(this, const char*, size_t)
 bool g_sounds_ok = false;                             // the code above looks as expected
-const char* const kSoundOpen   = "/Master/UI/PauseMenu/HZ2_SFX_UI_PauseMenu_SubMenuOpen_01";
-const char* const kSoundClose  = "/Master/UI/PauseMenu/HZ2_SFX_UI_PauseMenu_SubMenuClose_01";
+const char* const kSoundOpen   = "/Master/UI/Generic/HZ2_SFX_UI_Generic_Select_01";        // FH3 has no SubMenuOpen
+const char* const kSoundClose  = "/Master/UI/PopUpMenu/HZ2_SFX_HUD_PopUpMenu_Back_01";
 const char* const kSoundSelect = "/Master/UI/PauseMenu/HZ2_SFX_UI_PauseMenu_Select_01";
 
 struct GameString {   // MSVC std::string
@@ -2783,14 +2786,17 @@ constexpr uintptr_t RVA_BACK_SOUNDS = 0x3684B90;
 constexpr uintptr_t RVA_BACK_SOUND_CODE = 0x0CEC418;   // checked: the page's B playing it
 const char* const kSoundBack = "/Master/UI/PopUpMenu/HZ2_SFX_HUD_PopUpMenu_Back_01";
 
-void play_sound_inner(const char* name, uintptr_t player_rva) {
-    void* player = *reinterpret_cast<void**>(g_base + player_rva);
+// FH3: the page's B (0x14981A0) gets the player from 0x1EED710(), makes the name with 0x304C60(out, const char*)
+// and hands it to the player's vtable +0x08, which frees it.
+constexpr uintptr_t RVA_FH3_SOUND_PLAYER = 0x1EED710;
+constexpr uintptr_t RVA_FH3_SOUND_NAME   = 0x0304C60;
+void play_sound_inner(const char* name, uintptr_t) {
+    void* player = reinterpret_cast<void* (*)()>(g_base + RVA_FH3_SOUND_PLAYER)();
     if (!player) return;
-    GameString str{};
-    str.cap = 15;
-    reinterpret_cast<void (*)(GameString*, const char*, std::size_t)>(g_base + RVA_STRING_ASSIGN)(&str, name, std::strlen(name));
+    alignas(16) uint8_t str[0x40] = {};
+    void* made = reinterpret_cast<void* (*)(void*, const char*)>(g_base + RVA_FH3_SOUND_NAME)(str, name);
     void** vt = *reinterpret_cast<void***>(player);
-    reinterpret_cast<void (*)(void*, GameString*)>(vt[1])(player, &str);
+    reinterpret_cast<void (*)(void*, void*)>(vt[1])(player, made);
 }
 
 void play_sound(const char* name, uintptr_t player_rva = RVA_UI_SOUNDS) {
@@ -2810,10 +2816,13 @@ void play_sound(const char* name, uintptr_t player_rva = RVA_UI_SOUNDS) {
 constexpr uintptr_t RVA_HUD_PAGE_LOADED  = 0x0C7AD40;
 constexpr uintptr_t RVA_HUD_PAGE_VT_SLOT = 0x2DF06C0;   // HudOptions page vtable +0x488
 constexpr uintptr_t RVA_FOCUS_FIRST      = 0x0C7A730;   // checked: it's the code this copies
-constexpr uintptr_t RVA_AVUI_STRING      = 0x1663220;   // (String* out, const char*, int length or -1)
-constexpr uintptr_t RVA_AVUI_STRING_FREE = 0x16650A0;   // (String*)
-constexpr uintptr_t RVA_FIND_NAME        = 0x0C63120;   // Element* (String** name, page)
-constexpr uintptr_t RVA_FOCUS            = 0x14D01D0;   // (Ptr* out, IInputElement*)
+constexpr uintptr_t RVA_AVUI_STRING      = 0x2094100;   // (String* out, const char*, int length or -1)
+constexpr uintptr_t RVA_AVUI_STRING_FREE = 0x2095E20;   // (String*)
+constexpr uintptr_t RVA_FIND_NAME        = 0x20EA170;   // Element* (page, String* name, void* scratch) (FH3)
+constexpr uintptr_t RVA_FOCUS            = 0x203BF60;   // (Ptr* out, IInputElement*)
+constexpr uintptr_t RVA_FH3_FOCUS_FIRST  = 0x13A19A0;   // HudOptions vtable slot 148: focus FirstItem (the page shown)
+constexpr uintptr_t RVA_FH3_HUD_VT       = 0x4566590;   // HudOptions page vtable (189 slots)
+constexpr uintptr_t RVA_FH3_PAGE_BUTTON  = 0x14981A0;   // slot 179: buttons (page, key, pressed)
 using AvuiStringFn     = void (*)(void* out, const char* text, int length);
 using AvuiStringFreeFn = void (*)(void* s);
 using FindNameFn       = uint8_t* (*)(void** name, void* page);
@@ -2823,12 +2832,11 @@ TileFn o_hud_page_loaded = nullptr;
 bool focus_named_inner(void* page, const char* name) {
     alignas(16) uint8_t str[0x80] = {};
     reinterpret_cast<AvuiStringFn>(g_base + RVA_AVUI_STRING)(str, name, -1);
-    void* ref = str;
-    InterlockedIncrement(reinterpret_cast<volatile LONG*>(str + 0x10));
-    uint8_t* el = reinterpret_cast<FindNameFn>(g_base + RVA_FIND_NAME)(&ref, page);
+    void* scratch[2] = {};
+    uint8_t* el = reinterpret_cast<uint8_t* (*)(void*, void*, void*)>(g_base + RVA_FIND_NAME)(page, str, scratch);
     reinterpret_cast<AvuiStringFreeFn>(g_base + RVA_AVUI_STRING_FREE)(str);
     if (!el) return false;
-    void** iface = reinterpret_cast<void**>(el + 0xB8);
+    void** iface = reinterpret_cast<void**>(el + 0x88);
     reinterpret_cast<void (*)(void*)>((*reinterpret_cast<void***>(iface))[3])(iface);
     void* out[4] = {};
     reinterpret_cast<FocusFn>(g_base + RVA_FOCUS)(out, iface);
@@ -2975,8 +2983,10 @@ void d_hud_page_loaded(void* page) {
 // and B as 45 (seen in the log); on the options pages both leave the page.
 constexpr uintptr_t RVA_HUD_PAGE_BUTTON_SLOT = 0x2DF07B0;   // HudOptions page vtable +0x578
 constexpr uintptr_t RVA_PAGE_BUTTON          = 0x0CEC3D0;   // the shared implementation
-constexpr int kButtonA                       = 18;
-constexpr int kButtonB                       = 45;
+// FH3 hands the page action ids, not keys: B (Cancel) is 999999 (0xF423F, seen in the page's own code); A
+// (Accept) is taken to be 999998, the id next to it, and every other id is logged once.
+constexpr int kButtonA                       = 0xF423E;
+constexpr int kButtonB                       = 0xF423F;
 using PageButtonFn = bool (*)(void* page, int button, bool pressed);
 PageButtonFn o_hud_page_button = nullptr;
 
@@ -3002,8 +3012,8 @@ std::set<int> g_buttons_seen;
 
 int pad_button(int key) {
     switch (key) {
-        case 18: return FH3_BUTTON_A;
-        case 45: return FH3_BUTTON_B;
+        case kButtonA: return FH3_BUTTON_A;
+        case kButtonB: return FH3_BUTTON_B;
         case 67: return FH3_BUTTON_X;
         case 68: return FH3_BUTTON_Y;
         case 19: return FH3_BUTTON_LB;
@@ -3052,6 +3062,11 @@ bool custom_page_button(void* page, int j, int button, bool pressed) {
 }
 
 bool d_hud_page_button(void* page, int button, bool pressed) {
+    if (pressed && g_in_hub && g_buttons_seen.insert(button).second) {
+        char b[48];
+        std::snprintf(b, sizeof b, "page button %d (0x%X)", button, button);
+        slog(b);
+    }
     if (page && (page == g_updates_page.load() || page == g_about_page.load()) && button == kButtonA) {
         const std::vector<std::string>& urls = page == g_about_page.load() ? g_about_urls : g_update_urls;
         const int n = g_selected.load();
@@ -3276,6 +3291,7 @@ bool show_marketplace_tab(FH3Mod* m) {
 }
 
 bool g_hub_files = false;   // the tab's files were written
+std::atomic<bool> g_fh3_ready{false};   // FH3: the Mods page's hooks are in
 
 void hook_hub() {
     struct Check {
@@ -3826,13 +3842,75 @@ void hook_game() {
     hook_hub();
 }
 
+
+// ---- hooking up, FH3 -------------------------------------------------------------------------
+// FH3 has no Settings tile or Marketplace tab to take over: the pages open from the Home tab's MODS tile
+// (mods_page.cpp, through pause.xml's online_party_list, which ui_patches.cpp points at the HUD page) and,
+// later, the MODS tab. What's hooked: FindProperty (our rows' properties), the HUD page's scene record (which
+// page it loads), and two slots of the HUD page's vtable: "focus FirstItem" (slot 148, run as the page shows:
+// our "loaded") and the buttons (slot 179).
+void hook_game_fh3() {
+    void* base = g_api->wait_for_code(0xFFFFFFFFu);
+    if (!base) return;
+    g_base = reinterpret_cast<uintptr_t>(base);
+    struct Check {
+        uintptr_t rva;
+        std::vector<uint8_t> bytes;
+    };
+    const Check checks[] = {
+        {RVA_FIND_PROPERTY, {0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48}},
+        {RVA_MODEL_PROPERTY, {0x40, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF}},
+        {RVA_NOTIFY_PROP, {0x40, 0x57, 0x48, 0x83, 0xEC, 0x60, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF}},
+        {RVA_HUD_SCENE_RECORD, {0x48, 0x8B, 0xC4, 0x48, 0x89, 0x48, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x70}},
+        {RVA_BOX_FLOAT, {0x40, 0x53, 0x48, 0x83, 0xEC, 0x30, 0x48, 0x8B, 0xD9, 0xC7, 0x44, 0x24, 0x20, 0x00, 0x00, 0x00, 0x00, 0xE8}},
+        {RVA_FH3_FOCUS_FIRST, {0x40, 0x57, 0x48, 0x83, 0xEC, 0x70}},
+        {RVA_FH3_PAGE_BUTTON, {0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x50}},
+    };
+    for (const Check& c : checks)
+        if (!code_matches(c.rva, c.bytes.data(), c.bytes.size())) {
+            char b[16];
+            std::snprintf(b, sizeof b, "%llX", static_cast<unsigned long long>(c.rva));
+            slog(std::string("the game's code at game+") + b + " doesn't look as expected; no Mods page");
+            return;
+        }
+    void** vt = reinterpret_cast<void**>(g_base + RVA_FH3_HUD_VT);
+    if (!readable(vt, 189 * 8) || vt[148] != reinterpret_cast<void*>(g_base + RVA_FH3_FOCUS_FIRST) ||
+        vt[179] != reinterpret_cast<void*>(g_base + RVA_FH3_PAGE_BUTTON)) {
+        slog("the HUD page's vtable doesn't look as expected; no Mods page");
+        return;
+    }
+    g_sliders_ok = true;
+    g_popup_ok   = false;   // the restart message box isn't ported yet: the page's notice says it instead
+    {
+        std::scoped_lock lk{g_mu};
+        g_asked_values = current_values();
+    }
+    FH3Mod* m = &g_owner_mod;
+    FH3Hook* fp = g_api->hook_function(m, "AVUI::Type::FindProperty", reinterpret_cast<void*>(g_base + RVA_FIND_PROPERTY),
+                                       reinterpret_cast<void*>(&d_find_property), reinterpret_cast<void**>(&o_find_property));
+    FH3Hook* sr = g_api->hook_function(m, "HUD options scene record", reinterpret_cast<void*>(g_base + RVA_HUD_SCENE_RECORD),
+                                       reinterpret_cast<void*>(&d_hud_scene), reinterpret_cast<void**>(&o_hud_scene));
+    FH3Hook* ld = g_api->hook_pointer(m, "HUD options page: shown", &vt[148], reinterpret_cast<void*>(&d_hud_page_loaded),
+                                      reinterpret_cast<void**>(&o_hud_page_loaded));
+    FH3Hook* bt = g_api->hook_pointer(m, "HUD options page: buttons", &vt[179], reinterpret_cast<void*>(&d_hud_page_button),
+                                      reinterpret_cast<void**>(&o_hud_page_button));
+    if (!fp || !sr || !ld || !bt || !g_api->enable_hooks(m, nullptr)) {
+        slog("hooking the HUD page failed; no Mods page");
+        g_api->disable_hooks(m, nullptr);
+        return;
+    }
+    g_sounds_ok = true;
+    g_fh3_ready = true;
+    slog("Mods page ready");
+}
+
 } // namespace
 
 // ---- the API ---------------------------------------------------------------------------------
 
 int settings_add(FH3Mod* m, const FH3Setting* s) {
     if (!m || !s || s->size < offsetof(FH3Setting, user) + sizeof(void*)) return 0;
-    if (!kGameFeatures) {
+    if (!kModsPage) {
         log_line(m->name, "add_setting: the Mods page isn't available for Forza Horizon 3 yet");
         return 0;
     }
@@ -4442,7 +4520,7 @@ bool write_hud_notice() {
 // mod added a row) and hook the game.
 void settings_start(const FH3ModApi* api) {
     g_api = api;
-    if (!kGameFeatures) {
+    if (!kModsPage) {
         slog("the Mods page, the MODS tab and title-screen entries aren't available for Forza Horizon 3 yet");
         return;
     }
@@ -4457,67 +4535,28 @@ void settings_start(const FH3ModApi* api) {
     }
     add_hub_rows();
     g_written = true;
-    const char* const files[] = {"UI/Scenes/Anthem/A_PauseOptions.xaml", "UI/Scenes/Anthem/A_ModOptions.xaml",
-                                 "UI/Scenes/Anthem/A_PauseMenu.xaml",    "stateflow/pause.xml", "stateflow/ui_screens.xml",
-                                 kTitleFile};
     if (game_mount().empty()) {
-        slog("the game folder wasn't found; no Mods page or MODS tab");
-        for (const char* f : files) remove_leftover_file(f);
+        slog("the game folder wasn't found; no Mods page");
         return;
     }
-    // the MODS tab
-    g_hub_files = write_pause_menu() && write_pause_flow();
-    remove_leftover_file("stateflow/ui_screens.xml");
+    // FH3: the pages only (Installed mods, Updates, About, and All settings as A_ModOptions); the Home tab's MODS
+    // tile opens Installed mods (mods_page.cpp), the MODS tab comes later.
+    g_hub_files = true;
     for (int p = kHubInstalled; p <= kHubAbout && g_hub_files; ++p)
         if (p != kHubGetMods) g_hub_files = write_hub_page(p);
-    // the mods' pages on tiles (written now as well as when they open, as the others are)
-    for (std::size_t t = 0; t < kTileCount; ++t) {
-        const int p = kHubTilePage + static_cast<int>(t);
-        bool has = false;
-        {
-            std::scoped_lock lk{g_mu};
-            has = g_tile_page[t] >= 0;
-        }
-        if (!(g_hub_files && has && write_hub_page(p))) {
-            remove_leftover_file(("UI/Scenes/Anthem/" + hub_file(p)).c_str());
-            std::scoped_lock lk{g_mu};
-            g_tile_page[t] = -1;
-        }
-    }
-    remove_leftover_file("UI/Scenes/Anthem/A_ModPage_03.xaml");   // Get mods, before it opened the mod site
-    remove_leftover_file("UI/Scenes/Anthem/A_ModPage_05.xaml");   // Making mods, before 2.5.0's release
-    if (!g_hub_files) {
-        clear_file(&g_owner_mod, "UI/Scenes/Anthem/A_PauseMenu.xaml");
-        clear_file(&g_owner_mod, "stateflow/pause.xml");
-        clear_file(&g_owner_mod, "stateflow/ui_screens.xml");
-    }
-    // Settings > Mods (also the tab's All settings)
-    bool mods_page = write_mods_page();
-    g_settings_tile = n && mods_page && write_settings_page();
-    if (!g_settings_tile) {
-        // No rows this time (the mods that had some were removed): take the tile back out
-        // before the game reads its menus, rather than with the clean-up later.
-        remove_leftover_file("UI/Scenes/Anthem/A_PauseOptions.xaml");
-        clear_file(&g_owner_mod, "UI/Scenes/Anthem/A_PauseOptions.xaml");
-    }
+    const bool mods_page = write_mods_page();
     if (!mods_page) remove_leftover_file("UI/Scenes/Anthem/A_ModOptions.xaml");
-    if (!write_hud_notice()) remove_leftover_file("UI/Scenes/Anthem/A_Hud.xaml");
-    write_title_page();
-    slog(std::to_string(n) + " row(s) on the Mods page, " + std::to_string(g_entries.size()) + " mod(s) on the MODS tab" +
+    slog(std::to_string(n) + " row(s) on the Mods page, " + std::to_string(g_entries.size()) + " mod(s) on Installed mods" +
          (g_hub_files ? "" : " (not shown)"));
-    if (g_hub_files || g_settings_tile || g_title_page) std::thread(hook_game).detach();
-    if (g_hub_files)
-        // Update checks finish after this (from the cache, usually within a second or two): the
-        // UPDATES tile's count is rewritten while the game is likely still to read the page.
-        std::thread([] {
-            for (int i = 0; i < 60; ++i) {
-                Sleep(1000);
-                if (updates_out() != g_pause_menu_updates) {
-                    std::scoped_lock lk{g_page_mu};
-                    write_pause_menu();
-                }
-            }
-        }).detach();
+    if (g_hub_files) std::thread(hook_game_fh3).detach();
+}
+
+// The Home tab's MODS tile (mods_page.cpp), just before it fires the transition to the HUD page: write the
+// page and point the next HUD page at it. False when the Mods page isn't there (the caller shows the old one).
+bool settings_hub_open(int which) {
+    if (!g_fh3_ready.load()) return false;
+    open_hub_page(nullptr, which);
+    return true;
 }
 
 FH3Mod* settings_owner() { return &g_owner_mod; }

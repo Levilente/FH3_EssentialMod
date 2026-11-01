@@ -50,6 +50,9 @@ constexpr uint32_t kGameSizeOfImage = 0x05495000u; // FH3's forza_durango_releas
 // changes) were found in FH2 and are switched off here until they are found again in FH3. Hooks, logging,
 // crash reports, hotkeys, commands and the mods' own services still work.
 constexpr bool kGameFeatures = false;
+// The Mods page (settings.cpp): mods' rows on pages laid out like the HUD options page, opened from the Home
+// tab's MODS tile. The FH3 addresses are in docs/mods-page-fh3-map.md.
+constexpr bool kModsPage = true;
 // Game database patches (database.cpp): gamedbRC.slt is plain SQLite on FH3, so mods' SQL works.
 constexpr bool kDatabase = true;
 // The mediaoverride and mediapc folders mounted over game:\media\ (media_overrides.cpp), ported to FH3.
@@ -134,6 +137,7 @@ int pages_set_tile_colors(FH3Mod* mod, const char* page_key, uint32_t background
 int title_add(FH3Mod* mod, const FH3TitleEntry* entry);
 const char* title_started_by(FH3Mod* mod);
 // After every fh3mod_init: writes the pages and hooks the game if any mod added a row.
+bool settings_hub_open(int which);
 void settings_start(const FH3ModApi* api);
 
 // The MODS tab (platform 2.5.0): every mod in fh3-mods, loaded or turned off there.

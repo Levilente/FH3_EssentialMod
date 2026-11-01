@@ -66,7 +66,8 @@ void set_state_b(void* page, const void* name, int reason) {
 void open_mods(void* page) {
     char* base = game();
     if (!base || !page) return;
-    once("MODS tile pressed: opening the Mods page");
+    once(settings_hub_open(1) ? "MODS tile pressed: opening Installed mods"
+                              : "MODS tile pressed, but the Mods page isn't ready (see above): the HUD options page opens");
     reinterpret_cast<Fire>(base + RVA_FIRE)(page, base + RVA_PARTY_ID, 0);
 }
 void handler_a(void* page) { open_mods(page); }

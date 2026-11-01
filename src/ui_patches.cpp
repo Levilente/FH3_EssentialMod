@@ -276,34 +276,16 @@ std::string pause_menu(std::string xaml, std::string& report) {
     return xaml;
 }
 
-// Pause > "online_party_list" (what the Horizon Group tile fires) shows the game's placeholder text page instead of the
-// party list: a big line of text, closed with A. This is the empty Mods page; the page for the mod list comes later.
+// Pause > "online_party_list" (what the Horizon Group tile fires) opens, instead of the
+// party list: the HUD options page, which settings.cpp turns into Installed mods.
 std::string pause_flow(std::string xml, std::string& report) {
     const char* const old_node =
         "<node id=\"online_party_list\" state=\"ui_screens.show_online_party_list\">";
     const std::size_t at = xml.find(old_node);
     if (at == std::string::npos) return report += " -mods-page", xml;
-    xml.replace(at, std::strlen(old_node),
-                "<node id=\"online_party_list\" state=\"global.add_sticky\" name=\"PlaceholderTextSceneText\" type=\"string\" data=\"FH3MP_MODS\">\n"
-                "      <exit target=\"fh3mp_mods\" />\n    </node>\n\n"
-                "    <node id=\"fh3mp_mods\" state=\"fh3mp_mods_page\">");
-    // the page's own state (added at the end of the group): the placeholder page, B goes back with the game's sound
-    const std::size_t end = xml.rfind("</stategroup>");
-    if (end == std::string::npos) return report += " -mods-page", xml;
-    xml.insert(end, R"(  <state id="fh3mp_mods_page">
-    <entry target="." />
-    <exit id="back" />
-
-    <behavior id="UIPagePlaceholderTextScene" force_reload="true" />
-    <behavior id="WaitForButtonPress" button="INPUTCMD_UI_CANCEL_PRESS">
-      <transition id="onReady" target="play_back_sound_event" />
-    </behavior>
-
-    <node id="play_back_sound_event" state="global.play_ui_sound_event" event_name="/Master/UI/PopUpMenu/HZ2_SFX_HUD_PopUpMenu_Back_01">
-      <exit target=".back" />
-    </node>
-  </state>
-)");
+    // The HUD options page (its back already goes to the pause menu); settings.cpp points the page it loads at
+    // the Mods page's own XAML.
+    xml.replace(at, std::strlen(old_node), "<node id=\"online_party_list\" state=\"ui_screens.show_hud_options\">");
     report += " +mods-page";
     // Exit to Desktop, after Yes: the placeholder page as a "saving" screen (A_PlaceholderTextScene below shows a
     // spinner for this text), the game's own blocking save, then the same page again, waiting for A on a loop, so
