@@ -1209,7 +1209,7 @@ bool write_list_page(const char* file, const std::string& title, const std::vect
                      const char* a_help = "{local:Loc HelpButtons.IDS_Select}") {
     std::string page = read_hud_options();
     if (page.empty()) return false;
-    std::string res = "\r\n            <local:FZBooleanToVisibilityConverter x:Key=\"FH3Mod_ShowNotice\" UseHidden=\"true\" InvertResult=\"false\" />\r\n"
+    std::string res = "\r\n            <System:Double x:Key=\"A_Double_HUDSafeFrameHorizontalMax\">0.69</System:Double>\r\n            <System:Double x:Key=\"A_Double_HUDSafeFrameVerticalMax\">0.25</System:Double>\r\n            <local:FZBooleanToVisibilityConverter x:Key=\"FH3Mod_ShowNotice\" UseHidden=\"true\" InvertResult=\"false\" />\r\n"
                       "            <local:FZBooleanToVisibilityConverter x:Key=\"FH3Mod_ShowView\" UseHidden=\"false\" InvertResult=\"false\" />\r\n"
                       "            <local:FZBooleanToVisibilityConverter x:Key=\"FH3Mod_ShowList\" UseHidden=\"true\" InvertResult=\"false\" />\r\n"
                       "            <local:FZBooleanToVisibilityConverter x:Key=\"FH3Mod_HideView\" UseHidden=\"false\" InvertResult=\"true\" />\r\n"
