@@ -54,21 +54,16 @@ bool is_mods_tile(const void* name) {
     char* base = game();
     return base && name == *reinterpret_cast<const void* const*>(base + RVA_NAME);
 }
+std::atomic<void*> g_home{nullptr};   // the Home tab page the MODS tile was pressed on
 std::atomic<int> g_reopen{0};          // a Mods page to open as soon as the Home tab is back (see mods_reopen)
 std::atomic<uint64_t> g_reopen_at{0};
 void open_mods(void* page);
 void set_state_a(void* page, const void* name, int state) {
     if (is_mods_tile(name)) state = 0;
     g_set_a(page, name, state);
-    if (g_reopen.load() && is_mods_tile(name) && GetTickCount64() >= g_reopen_at.load()) {
-        const int which = g_reopen.exchange(0);
-        if (which && settings_hub_open(which)) {
-            char* base = game();
-            if (base) reinterpret_cast<Fire>(base + RVA_FIRE)(page, base + RVA_PARTY_ID, 0);
-        }
-    }
 }
 void set_state_b(void* page, const void* name, int reason) {
+
     if (is_mods_tile(name)) return;
     g_set_b(page, name, reason);
 }
@@ -76,6 +71,7 @@ void set_state_b(void* page, const void* name, int reason) {
 void open_mods(void* page) {
     char* base = game();
     if (!base || !page) return;
+    g_home = page;
     once(settings_hub_open(1) ? "MODS tile pressed: opening Installed mods"
                               : "MODS tile pressed, but the Mods page isn't ready (see above): the HUD options page opens");
     reinterpret_cast<Fire>(base + RVA_FIRE)(page, base + RVA_PARTY_ID, 0);
@@ -87,6 +83,21 @@ void open_mods(void* page) {
 void mods_reopen(int which) {
     g_reopen_at = GetTickCount64() + 250;
     g_reopen    = which;
+    // if the Home tab sets no tile in the meantime, open it from here after a moment
+    std::thread([which] {
+        Sleep(900);
+        int w = which;
+        if (!g_reopen.compare_exchange_strong(w, 0)) return;
+        plog("reopen: no tile was set, opening from the timer");
+        void* page = g_home.load();
+        char* base = game();
+        if (!page || !base || !settings_hub_open(which)) return;
+        __try {
+            reinterpret_cast<Fire>(base + RVA_FIRE)(page, base + RVA_PARTY_ID, 0);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            plog("reopen: the transition faulted");
+        }
+    }).detach();
 }
 
 namespace {

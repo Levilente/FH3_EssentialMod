@@ -1598,7 +1598,7 @@ bool write_list_page(const char* file, const std::string& title, const std::vect
 bool write_custom_page(const char* file, const std::string& resources, const std::string& content, const std::string& help) {
     std::string page = read_hud_options();
     if (page.empty()) return false;
-    const std::string res = "\r\n            <local:FZBooleanToVisibilityConverter x:Key=\"FH3Mod_ShowIf\" UseHidden=\"false\" InvertResult=\"false\" />\r\n"
+    const std::string res = "\r\n            <System:Double x:Key=\"A_Double_HUDSafeFrameHorizontalMax\">0.69</System:Double>\r\n            <System:Double x:Key=\"A_Double_HUDSafeFrameVerticalMax\">0.25</System:Double>\r\n            <local:FZBooleanToVisibilityConverter x:Key=\"FH3Mod_ShowIf\" UseHidden=\"false\" InvertResult=\"false\" />\r\n"
                             "            <local:FZBooleanToVisibilityConverter x:Key=\"FH3Mod_ShowIfHidden\" UseHidden=\"true\" InvertResult=\"false\" />\r\n"
                             "            <local:FZBooleanToVisibilityConverter x:Key=\"FH3Mod_HideIf\" UseHidden=\"false\" InvertResult=\"true\" />\r\n" +
                             resources + "\r\n        ";
@@ -1977,7 +1977,7 @@ std::vector<PageItem> mod_page_items(std::size_t i) {
                 ++own;
             }
     }
-    if (!own)
+    if (!own && !e.enabled)   // (an info row on a mod's page crashed the game when the page opened; only said when it matters)
         items.push_back(info("No settings", !e.enabled ? "Its settings show here once it's turned on and the game has restarted."
                                             : e.online_off ? "It isn't loaded for online play, so its settings aren't here this time."
                                             : e.platform_mod ? "This mod has no settings of its own."
