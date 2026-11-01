@@ -285,7 +285,9 @@ std::string pause_flow(std::string xml, std::string& report) {
     if (at == std::string::npos) return report += " -mods-page", xml;
     // The HUD options page (its back already goes to the pause menu); settings.cpp points the page it loads at
     // the Mods page's own XAML.
-    xml.replace(at, std::strlen(old_node), "<node id=\"online_party_list\" state=\"ui_screens.show_hud_options\">");
+    xml.replace(at, std::strlen(old_node),
+                "<node id=\"online_party_list\" state=\"ui_screens.show_hud_options\">\n"
+                "      <exit id=\"online_party_list\" target=\"online_party_list\" />");
     report += " +mods-page";
     // Exit to Desktop, after Yes: the placeholder page as a "saving" screen (A_PlaceholderTextScene below shows a
     // spinner for this text), the game's own blocking save, then the same page again, waiting for A on a loop, so
@@ -308,6 +310,23 @@ std::string pause_flow(std::string xml, std::string& report) {
                "    <node id=\"fh3mp_exit_hold\" state=\"ui_screens.show_placeholder_text_scene\" text=\"FH3MP_SAVING\" wait_for_button_press=\"true\">\n"
                "      <exit target=\"fh3mp_exit_hold\" />\n    </node>\n\n    ");
     report += " +exit-save";
+    return xml;
+}
+
+// ui_screens.xml: the HUD options page can raise "online_party_list" itself (a transition the pause menu already
+// has, so its id exists), which pause.xml sends back to the same node: the Mods pages replace each other that way
+// (Installed mods -> a mod's settings -> back) without leaving the menu.
+std::string screens_flow(std::string xml, std::string& report) {
+    const char* const old_state = "<state id=\"show_hud_options\">";
+    const std::size_t at = xml.find(old_state);
+    if (at == std::string::npos) return report += " -hud-reenter", xml;
+    const std::size_t exit_at = xml.find("<exit id=\"back\" />", at);
+    const char* const old_tr = "<transition id=\"back\" target=\".back\" />";
+    const std::size_t tr_at  = xml.find(old_tr, at);
+    if (exit_at == std::string::npos || tr_at == std::string::npos || tr_at < exit_at) return report += " -hud-reenter", xml;
+    xml.insert(tr_at + std::strlen(old_tr), "\n      <transition id=\"online_party_list\" target=\".online_party_list\" />");
+    xml.insert(exit_at + std::strlen("<exit id=\"back\" />"), "\n    <exit id=\"online_party_list\" />");
+    report += " +hud-reenter";
     return xml;
 }
 
@@ -456,6 +475,7 @@ struct Patch {
 const Patch kPatches[] = {
     {"UI.zip", "Scenes/Anthem/A_PauseMenu.xaml", pause_menu},
     {"stateflow.zip", "pause.xml", pause_flow},
+    {"stateflow.zip", "ui_screens.xml", screens_flow},
     {"UI.zip", "Scenes/Anthem/A_PlaceholderTextScene.xaml", placeholder_scene},
     {"Stripped/StringTables/EN.zip", "Main.str", main_strings},
     {"Stripped/StringTables/GB.zip", "Main.str", main_strings},

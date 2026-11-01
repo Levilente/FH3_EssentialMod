@@ -70,6 +70,22 @@ void open_mods(void* page) {
                               : "MODS tile pressed, but the Mods page isn't ready (see above): the HUD options page opens");
     reinterpret_cast<Fire>(base + RVA_FIRE)(page, base + RVA_PARTY_ID, 0);
 }
+}  // namespace
+
+// From a HUD options page: raises the same "online_party_list" transition on it, which the state flow sends back to
+// the node (Mods pages replace each other).
+bool mods_fire(void* page) {
+    char* base = game();
+    if (!base || !page) return false;
+    __try {
+        reinterpret_cast<Fire>(base + RVA_FIRE)(page, base + RVA_PARTY_ID, 0);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+namespace {
 void handler_a(void* page) { open_mods(page); }
 void handler_b(void* page, int) { open_mods(page); }
 

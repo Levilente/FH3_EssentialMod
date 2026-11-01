@@ -260,6 +260,7 @@ void notify_changed(void* obj, void* desc) {
     __try {
         reinterpret_cast<NotifyFn>(g_base + RVA_NOTIFY_PROP)(obj, desc);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
+        slog("notify_changed faulted");
     }
 }
 
@@ -374,7 +375,10 @@ void** __cdecl selected_get(void** out, void*, void*) {
     return out;
 }
 void __cdecl selected_set(void*, void* obj, uint8_t* value) {
-    if (obj) g_view_obj = obj;
+    {
+        static void* last = nullptr;
+        if (obj != last) { last = obj; slog("selected_set obj differs from the view obj: " + std::to_string(reinterpret_cast<uintptr_t>(obj)) + " vs " + std::to_string(reinterpret_cast<uintptr_t>(g_view_obj.load()))); }
+    }
     if (value && readable(value + 0x28, 4)) {
         g_selected = *reinterpret_cast<int*>(value + 0x28);
     }
@@ -428,6 +432,18 @@ void** __cdecl view_get(void** out, void* desc, void* obj) {
     // Only Installed mods binds these, and they're read as it loads: so switch_view can notify
     // from the first press of A, before the selection has moved and FH3Mod_Selected been set.
     if (obj) g_view_obj = obj;
+    {
+        static int logged = 0;
+        static void* seen = nullptr;
+        if (obj != seen) { seen = obj; slog("view_get obj " + std::to_string(reinterpret_cast<uintptr_t>(obj))); }
+        if (g_view.load() != 0 && logged < 40) {
+            ++logged;
+            int which = -1;
+            for (int k = 0; k < kMaxViews; ++k)
+                if (g_view_desc[k] == desc) which = k;
+            slog("view_get after switch: View_" + std::to_string(which) + (obj ? " obj" : " no obj"));
+        }
+    }
     const int now = g_view.load();
     const bool back = g_view_back.load();
     bool v = false;
@@ -819,10 +835,29 @@ const wchar_t* avui_string(uint8_t* name) {
     }
 }
 
+uint8_t* custom_property(uint8_t* type, uint8_t* name);
 uint8_t* d_find_property(uint8_t* type, uint8_t* name) {
     if (uint8_t* r = o_find_property(type, name)) return r;
+    uint8_t* r = custom_property(type, name);
+    if (r && type) {
+        static int logged = 0;
+        void* owner = *reinterpret_cast<void**>(r + 0x50);
+        if (owner != type && logged < 6) {
+            ++logged;
+            slog("descriptor owner " + std::to_string(reinterpret_cast<uintptr_t>(owner)) + " vs the asked type " + std::to_string(reinterpret_cast<uintptr_t>(type)));
+        }
+        *reinterpret_cast<void**>(r + 0x50) = type;
+    }
+    return r;
+}
+uint8_t* custom_property(uint8_t* type, uint8_t* name) {
+    (void)type;
     const wchar_t* n = avui_string(name);
     if (!n || std::wcsncmp(n, L"FH3Mod_", 7) != 0) return nullptr;
+    {
+        static std::set<std::wstring> asked;
+        if (asked.size() < 400 && asked.insert(n).second) slog("property asked: " + narrow(n));
+    }
     if (std::wcscmp(n, L"FH3Mod_RestartNotice") == 0) return notice_descriptor();
     if (std::wcscmp(n, L"FH3Mod_Selected") == 0) return selected_descriptor();
     if (std::wcscmp(n, L"FH3Mod_ViewSelected") == 0) return view_selected_descriptor();
@@ -2910,6 +2945,7 @@ void switch_view(void* page, int k, bool back, int row) {
         name = v < g_view_acts.size() && !g_view_acts[v].empty() && !g_view_acts[v][row].name.empty() ? g_view_acts[v][row].name
                                                                                                     : "FH3Mod_First_" + std::to_string(k);
     }
+    slog(std::string("switch_view: obj ") + (g_view_obj.load() ? "set" : "NULL") + ", desc old " + (g_view_desc[old] ? "set" : "null") + ", new " + (g_view_desc[k] ? "set" : "null"));
     notify_view(old);
     notify_view(k);
     if (void* obj = g_view_obj.load())
@@ -2952,6 +2988,7 @@ void select_on_page(int j, const std::string& row) {
 std::atomic<void*> g_installed_page{nullptr};
 std::atomic<void*> g_updates_page{nullptr};
 std::atomic<void*> g_about_page{nullptr};
+std::atomic<void*> g_modpage{nullptr};   // a mod's settings page (FH3: its own page, not a view)
 
 // Updates and About: A opens a row's page in the browser, or a folder in Explorer (shell32 only
 // when asked).
@@ -2991,6 +3028,12 @@ void d_hud_page_loaded(void* page) {
         g_view_back      = false;
     } else if (g_installed_page.load() == page) {
         g_installed_page = nullptr;
+    }
+    if (was_shown >= kHubModPage && was_shown < kHubTilePage) {
+        g_modpage = page;
+        g_selected = 0;
+    } else if (g_modpage.load() == page) {
+        g_modpage = nullptr;
     }
     bool tile_page = false;
     for (std::size_t t = 0; t < kTileCount; ++t)
@@ -3132,6 +3175,14 @@ bool d_hud_page_button(void* page, int button, bool pressed) {
             }
             return true;
         }
+    if (page && page == g_modpage.load() && (button == kButtonA || button == kButtonB)) {
+        if (button == kButtonB && pressed) {   // back to Installed mods, the same way the page was opened
+            play_sound(kSoundBack, RVA_BACK_SOUNDS);
+            open_hub_page(nullptr, kHubInstalled);
+            if (!mods_fire(page)) return o_hud_page_button(page, button, pressed);
+        }
+        return true;   // A on a row is the row's own; neither leaves the page
+    }
     if (page && page == g_installed_page.load() && (button == kButtonA || button == kButtonB)) {
         if (!pressed && !g_focus_again.empty()) {
             focus_named(page, g_focus_again.c_str());
@@ -3185,7 +3236,10 @@ bool d_hud_page_button(void* page, int button, bool pressed) {
             else if (view != 0) play_sound(kSoundBack, RVA_BACK_SOUNDS);   // B: the game's back, with the swoosh
             if (view == 0) {
                 const int n = g_selected.load();
-                if (n >= 0 && static_cast<std::size_t>(n) < g_entries.size() && n < kMaxModViews) switch_view(page, n + 1, false, 0);
+                if (n >= 0 && static_cast<std::size_t>(n) < g_entries.size() && static_cast<std::size_t>(n) < kMaxModPages) {
+                    open_hub_page(nullptr, kHubModPage + n);   // the mod's settings, as a page of their own
+                    if (!mods_fire(page)) slog("couldn't open the mod's page");
+                }
             } else if (button == kButtonB) {
                 switch_view(page, 0, true, 0);   // B (Back): done with this mod; A does nothing on a settings list
             }
