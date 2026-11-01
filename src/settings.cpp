@@ -3015,8 +3015,8 @@ void d_hud_page_loaded(void* page) {
 constexpr uintptr_t RVA_HUD_PAGE_BUTTON_SLOT = 0x2DF07B0;   // HudOptions page vtable +0x578
 constexpr uintptr_t RVA_PAGE_BUTTON          = 0x0CEC3D0;   // the shared implementation
 // FH3 hands the page action ids, not keys: B (Cancel) is 999999 (0xF423F, seen in the page's own code); A
-// (Accept) is taken to be 999998, the id next to it, and every other id is logged once.
-constexpr int kButtonA                       = 0xF423E;
+// (Accept) is 1000000 (seen in game), and every other id is logged once.
+constexpr int kButtonA                       = 0xF4240;   // 1000000, seen on A in game
 constexpr int kButtonB                       = 0xF423F;
 using PageButtonFn = bool (*)(void* page, int button, bool pressed);
 PageButtonFn o_hud_page_button = nullptr;
