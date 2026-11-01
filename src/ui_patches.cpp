@@ -273,23 +273,62 @@ std::string pause_menu(std::string xaml, std::string& report) {
     // Pressing it is taken over in mods_page.cpp; what it opens is set by the state-flow patch below.
     step("mods-tile", patch_tile(xaml, "PART_Button_GameParty", {{kTileState, "Enabled"}}));
     step("mods-title", patch_element(xaml, "x:Key=\"A_MenuDataItem_GameParty\"", {{"Heading", "MODS"}}));
-    // The Marketplace tab becomes the MODS tab: five tiles (the game's pack tiles, renamed), the rest hidden.
+    // A new tab of its own, after Marketplace: MODS, with five tiles.
     {
-        const std::string t = "Content=\"{local:Loc PauseMenu.IDS_CatTitle_Marketplace}\"";
-        const std::size_t at = xaml.find(t);
-        if (at != std::string::npos) xaml.replace(at, t.size(), "Content=\"MODS\"");
-        step("mods-tab-title", at != std::string::npos);
+        const auto insert_after = [&](const std::string& marker, const std::string& text, const char* what) {
+            const std::size_t at = xaml.find(marker);
+            if (at == std::string::npos) { step(what, false); return; }
+            xaml.insert(at + marker.size(), text);
+            step(what, true);
+        };
+        const auto insert_before = [&](const std::string& marker, const std::string& text, const char* what, std::size_t from = 0) {
+            const std::size_t at = xaml.find(marker, from);
+            if (at == std::string::npos) { step(what, false); return; }
+            xaml.insert(at, text);
+            step(what, true);
+        };
+        static const struct { const char* key; const char* head; const char* icon; } items[] = {
+            {"ModsInstalled", "Installed mods", "Textures/Anthem/PauseMenuTileBackgrounds/AllCarPacks.png"},
+            {"ModsUpdates", "Updates", "Textures/Anthem/Icons/PauseMenu/ExpansionPacks.png"},
+            {"ModsAbout", "About", "Textures/Anthem/Icons/PauseMenu/MyProfile.png"},
+            {"ModsGet", "Get Mods", "Textures/Anthem/Icons/PauseMenu/Extras.png"},
+            {"ModsAll", "All settings", "Textures/Anthem/Icons/PauseMenu/Extras.png"},
+        };
+        std::string data, tiles;
+        const char* styles[] = {"A_Style_Button_Tile_6x2", "A_Style_Button_Tile_2x2", "A_Style_Button_Tile_2x1",
+                                "A_Style_Button_Tile_2x1", "A_Style_Button_Tile_2x2"};
+        const char* templs[] = {"A_ControlTemplate_LargeHorizontalImageTile", "A_ControlTemplate_IconTile_Pause2x2",
+                                "A_ControlTemplate_SmallHorizontalIconTile", "A_ControlTemplate_SmallHorizontalIconTile",
+                                "A_ControlTemplate_IconTile_Pause2x2"};
+        const int gx[] = {0, 0, 2, 2, 4}, gy[] = {0, 2, 2, 3, 2};
+        for (int i = 0; i < 5; ++i) {
+            data += std::string("<local:TileMenuDataItem Heading=\"") + items[i].head + "\" Icon=\"/ForzaUI;component/" +
+                    items[i].icon + "\" x:Key=\"A_MenuDataItem_" + items[i].key + "\" UseAlternateColors=\"False\" />\n";
+            tiles += std::string("<local:FZButton DataContext=\"{StaticResource A_MenuDataItem_") + items[i].key +
+                     "}\" Style=\"{StaticResource " + styles[i] + "}\" Template=\"{StaticResource " + templs[i] +
+                     "}\" local:TileMenuNavigationManager.TileState=\"Enabled\" local:TileMenuNavigationManager.GridX=\"" +
+                     std::to_string(gx[i]) + "\" local:TileMenuNavigationManager.GridY=\"" + std::to_string(gy[i]) +
+                     "\" local:UIPageTransitionManager.TransitionIndex=\"" + std::to_string(i + 1) +
+                     "\" x:Name=\"PART_Button_" + items[i].key + "\" />\n";
+        }
+        insert_after("x:Key=\"A_MenuDataItem_Extras\" />", "\n" + data, "m-data");
+        const std::string state =
+            "<VisualState x:Name=\"Mods\"><Storyboard><DoubleAnimationUsingKeyFrames Storyboard.TargetName=\"PART_SCOPE_Mods\" "
+            "Storyboard.TargetProperty=\"(UIElement.RenderTransform).(TransformGroup.Children)[3].(TranslateTransform.X)\">"
+            "<EasingDoubleKeyFrame KeyTime=\"0\" Value=\"0\" /></DoubleAnimationUsingKeyFrames></Storyboard></VisualState>\n";
+        insert_before("</VisualStateGroup>", state, "m-state");
+        insert_after("x:Name=\"PART_GROUP_Marketplace\" />",
+                     "\n<ContentControl Content=\"MODS\" Style=\"{StaticResource A_Style_ContentControl_TabTitle_TiledMenus}\" "
+                     "VerticalAlignment=\"Center\" local:TileMenuNavigationManager.TileState=\"Enabled\" x:Name=\"PART_GROUP_Mods\" />",
+                     "m-title");
+        const std::size_t scope = xaml.find("x:Name=\"PART_SCOPE_Marketplace\"");
+        const std::size_t close = scope == std::string::npos ? scope : xaml.find("</Canvas>", scope);
+        if (close != std::string::npos) {
+            xaml.insert(close + 9, "\n<Canvas Style=\"{StaticResource A_Canvas_BaseMenu}\" VerticalAlignment=\"Center\" "
+                                   "x:Name=\"PART_SCOPE_Mods\">\n" + tiles + "</Canvas>");
+        }
+        step("m-scope", close != std::string::npos);
     }
-    step("m-installed", patch_element(xaml, "x:Key=\"A_MenuDataItem_CarPacks\"", {{"Heading", "Installed mods"}}));
-    step("m-updates", patch_element(xaml, "x:Key=\"A_MenuDataItem_ExpansionPacks\"", {{"Heading", "Updates"}}));
-    step("m-about", patch_element(xaml, "x:Key=\"A_MenuDataItem_SeasonPass\"", {{"Heading", "About"}}));
-    step("m-get", patch_element(xaml, "x:Key=\"A_MenuDataItem_ExpansionPass\"", {{"Heading", "Get Mods"}}));
-    step("m-all", patch_element(xaml, "x:Key=\"A_MenuDataItem_Extras\"", {{"Heading", "All settings"}}));
-    step("m-all-pos", patch_tile(xaml, "PART_Button_Extras", {{kGridX, "4"}}));
-    step("m-hide1", patch_tile(xaml, "PART_Button_MarketplaceFeatured", {{kTileState, "Hidden"}}));
-    step("m-hide2", patch_tile(xaml, "PART_Button_Marketplace_Infographic2", {{kTileState, "Hidden"}}));
-    step("m-hide3", patch_tile(xaml, "PART_Button_VIPMembership", {{kTileState, "Hidden"}}));
-    step("m-hide4", patch_tile(xaml, "PART_Button_Marketplace_Infographic3", {{kTileState, "Hidden"}}));
     return xaml;
 }
 
