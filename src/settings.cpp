@@ -3093,9 +3093,9 @@ bool custom_page_button(void* page, int j, int button, bool pressed) {
 }
 
 bool d_hud_page_button(void* page, int button, bool pressed) {
-    if (pressed && g_in_hub && g_buttons_seen.insert(button).second) {
-        char b[48];
-        std::snprintf(b, sizeof b, "page button %d (0x%X)", button, button);
+    if (g_in_hub && (button == kButtonA || button == kButtonB || g_buttons_seen.insert(button).second)) {
+        char b[64];
+        std::snprintf(b, sizeof b, "page button %d (0x%X) %s", button, button, pressed ? "down" : "up");
         slog(b);
     }
     if (page && (page == g_updates_page.load() || page == g_about_page.load()) && button == kButtonA) {
@@ -3186,8 +3186,8 @@ bool d_hud_page_button(void* page, int button, bool pressed) {
             if (view == 0) {
                 const int n = g_selected.load();
                 if (n >= 0 && static_cast<std::size_t>(n) < g_entries.size() && n < kMaxModViews) switch_view(page, n + 1, false, 0);
-            } else {
-                switch_view(page, 0, true, 0);   // B (Back) or A (Accept): done with this mod
+            } else if (button == kButtonB) {
+                switch_view(page, 0, true, 0);   // B (Back): done with this mod; A does nothing on a settings list
             }
         }
         return true;
