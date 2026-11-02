@@ -143,6 +143,19 @@ OverlayResult mount_overlay(void* filesystem, const char* form) {
     return r;
 }
 
+// No C++ objects with destructors here: it has a __try (newer clang refuses the mix).
+static bool mount_folders_guarded(void* filesystem, int* over, int* pc) {
+    bool crashed = false;
+    __try {
+        *over = mount_folder(filesystem, "game:\\mediaoverride\\", 0x7FFFFFFE);
+        *pc   = mount_folder(filesystem, "game:\\mediapc\\", 0x7FFFFFFD);
+        reinterpret_cast<Method>((*reinterpret_cast<void***>(filesystem))[0x1F8 / 8])(filesystem);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        crashed = true;
+    }
+    return crashed;
+}
+
 // Returns a line for the log, or "" when it's too early (no root volume yet).
 std::string mount_all(void* filesystem) {
     void* root = nullptr;
@@ -150,14 +163,7 @@ std::string mount_all(void* filesystem) {
     int expected = 0;
     if (!g_state.compare_exchange_strong(expected, 1)) return {};
     int over = 0, pc = 0;
-    bool crashed = false;
-    __try {
-        over = mount_folder(filesystem, "game:\\mediaoverride\\", 0x7FFFFFFE);
-        pc   = mount_folder(filesystem, "game:\\mediapc\\", 0x7FFFFFFD);
-        reinterpret_cast<Method>((*reinterpret_cast<void***>(filesystem))[0x1F8 / 8])(filesystem);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        crashed = true;
-    }
+    const bool crashed = mount_folders_guarded(filesystem, &over, &pc);
     std::string overlay;
     if (!crashed && !g_overlay_form.empty()) {
         plog("media overrides: mediaoverride and mediapc are in; mounting the platform overlay as " + g_overlay_form);
