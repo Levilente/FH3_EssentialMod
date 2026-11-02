@@ -49,6 +49,7 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <map>
 #include <mutex>
 #include <set>
 #include <string>
@@ -256,8 +257,24 @@ uint8_t* new_descriptor(const char* name, void* getter, void* setter, void* type
     return d;
 }
 
+// The game's own notify (0x56D4F0) raises the HUD page class's PropertyChanged event (its id from 0x57BFF0) on the
+// object it's given. Our properties' bindings are on the getter's object, whose table holds its own event (not that
+// id), so there: the same raise (0x20F40B0 on the object's event table), with the id of the event the object has.
 void notify_changed(void* obj, void* desc) {
     __try {
+        char* disp = obj ? *reinterpret_cast<char**>(static_cast<char*>(obj) + 0x28) : nullptr;
+        if (disp && *reinterpret_cast<int*>(disp + 0x64) > 0) {
+            void* id = *reinterpret_cast<void**>(*reinterpret_cast<char**>(disp + 0x58));
+            alignas(16) char args[0x80] = {};
+            reinterpret_cast<void (*)(void*)>(g_base + 0x1F6E7C0)(args);
+            *reinterpret_cast<uintptr_t*>(args) = g_base + 0x42F9A28;
+            *reinterpret_cast<void**>(args + 0x28) = desc;
+            if (desc) ++*reinterpret_cast<int*>(static_cast<char*>(desc) + 0x10);
+            reinterpret_cast<void (*)(void*, void*, void*, void*)>(g_base + 0x20F40B0)(obj, id, obj, args);
+            if (desc) --*reinterpret_cast<int*>(static_cast<char*>(desc) + 0x10);
+            reinterpret_cast<void (*)(void*)>(g_base + 0x1F71D70)(args);
+            return;
+        }
         reinterpret_cast<NotifyFn>(g_base + RVA_NOTIFY_PROP)(obj, desc);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         slog("notify_changed faulted");
@@ -1232,6 +1249,26 @@ void erase_attr(std::string& el, const std::string& name) {
 
 // `a_help`: what the help bar says A does on a page that tracks the selection (Select), or
 // null for nothing.
+constexpr uintptr_t RVA_REAL_DESC_ACCESSOR = 0x14FEA50, RVA_REAL_GETTER = 0x14CE790;
+uint8_t* real_desc() {
+    __try {
+        return reinterpret_cast<AccessorFn>(g_base + RVA_REAL_DESC_ACCESSOR)();
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
+}
+std::string real_prop_name() {
+    uint8_t* d = real_desc();
+    if (!d || !readable(d, 0x60)) return "";
+    const char* n = *reinterpret_cast<const char**>(d + 0x40);
+    if (!n || !readable(const_cast<char*>(n), 4)) return "";
+    return std::string(n, strnlen(n, 80));
+}
+void* (*o_real_getter)(void*, void*, void*) = nullptr;
+void* d_real_getter(void* out, void* desc, void* obj) {
+    static int n = 0;
+    if (n < 30) { ++n; slog("real getter called, obj " + std::to_string(reinterpret_cast<uintptr_t>(obj))); }
+    return o_real_getter(out, desc, obj);
+}
+
 bool write_list_page(const char* file, const std::string& title, const std::vector<PageItem>& items, bool track_selection = false,
                      const std::vector<std::vector<PageItem>>* views = nullptr, const std::vector<ViewTitle>* view_titles = nullptr,
                      const char* a_help = "{local:Loc HelpButtons.IDS_Select}") {
@@ -1580,6 +1617,14 @@ bool write_list_page(const char* file, const std::string& title, const std::vect
                             "                </Grid.RenderTransform>\r\n                ");
             page.insert(rd, views_style);
         }
+    }
+    if (views) {   // diagnostics: a hidden element bound to a real property of the game's, to see if notifying reaches bindings
+        const std::string real = real_prop_name();
+        const std::size_t b = page.find("<StackPanel Name=\"BasicOptions\"");
+        const std::size_t gt = b == std::string::npos ? b : page.find('>', b);
+        if (!real.empty() && gt != std::string::npos)
+            page.insert(gt + 1, "<Border Width=\"1\" Height=\"1\" Visibility=\"{Binding " + real + ", Converter={StaticResource FH3Mod_ShowList}}\" />");
+        slog("real property for the notify test: " + (real.empty() ? std::string("(none)") : real));
     }
     return set_file(&g_owner_mod, (std::string("UI/Scenes/Anthem/") + file).c_str(), page.data(), page.size()) != 0;
 }
@@ -2902,6 +2947,7 @@ bool focus_named(void* page, const char* name) {
     }
 }
 
+std::string num_hex(std::size_t v) { char b[24]; std::snprintf(b, sizeof b, "%zx", v); return b; }
 void notify_view(int k) {
     void* obj = g_view_obj.load();
     if (!obj || k < 0 || k >= kMaxViews) return;
@@ -2932,6 +2978,107 @@ void switch_view(void* page, int k, bool back, int row) {
     slog(std::string("switch_view: obj ") + (g_view_obj.load() ? "set" : "NULL") + ", desc old " + (g_view_desc[old] ? "set" : "null") + ", new " + (g_view_desc[k] ? "set" : "null"));
     notify_view(old);
     notify_view(k);
+    if (void* o = g_view_obj.load()) {
+        if (uint8_t* d = real_desc()) {
+            slog("notify test: the game's own property, on obj");
+            notify_changed(o, d);
+            slog("notify test: the game's own property, on page");
+            notify_changed(page, d);
+        }
+    }
+    if (static bool once3 = false; !once3 && page && g_view_obj.load()) {   // diagnostics: the objects' event tables
+        once3 = true;
+        void* pcid = nullptr;
+        __try { pcid = reinterpret_cast<void* (*)()>(g_base + 0x57BFF0)(); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        slog("events: PropertyChanged id " + std::to_string(reinterpret_cast<uintptr_t>(pcid)));
+        const auto dump = [&](const char* what, void* x) {
+            __try {
+                char* disp = *reinterpret_cast<char**>(static_cast<char*>(x) + 0x28);
+                if (!disp) { slog(std::string("events: ") + what + " has no table"); return; }
+                const int cnt = *reinterpret_cast<int*>(disp + 0x64);
+                char* arr = *reinterpret_cast<char**>(disp + 0x58);
+                slog(std::string("events: ") + what + " table: " + std::to_string(cnt) + " events");
+                for (int i = 0; i < cnt && i < 16; ++i) {
+                    char* e = arr + i * 0x48;
+                    slog(std::string("events:   ") + what + " event " + std::to_string(reinterpret_cast<uintptr_t>(*reinterpret_cast<void**>(e))) +
+                         (*reinterpret_cast<void**>(e) == pcid ? " (PropertyChanged)" : "") + ", handlers " + std::to_string(*reinterpret_cast<int*>(e + 0x44)));
+                }
+            } __except (EXCEPTION_EXECUTE_HANDLER) { slog(std::string("events: ") + what + " (fault)"); }
+        };
+        dump("page", page);
+        dump("obj", g_view_obj.load());
+        __try {   // the handlers of PropertyChanged on the page: their classes
+            char* disp = *reinterpret_cast<char**>(static_cast<char*>(page) + 0x28);
+            const int cnt = *reinterpret_cast<int*>(disp + 0x64);
+            char* arr = *reinterpret_cast<char**>(disp + 0x58);
+            for (int i = 0; i < cnt; ++i) {
+                char* e = arr + i * 0x48;
+                if (*reinterpret_cast<void**>(e) != pcid) continue;
+                const int hc = *reinterpret_cast<int*>(e + 0x44);
+                char* ha = *reinterpret_cast<char**>(e + 0x38);
+                std::map<uintptr_t, int> seen;
+                for (int j = 0; j < hc; ++j) {
+                    char* h = *reinterpret_cast<char**>(ha + j * 16);
+                    if (!h) continue;
+                    const uintptr_t vt = *reinterpret_cast<uintptr_t*>(h);
+                    if (seen[vt]++ == 0) {
+                        char** v = reinterpret_cast<char**>(vt);
+                        slog("handler class vt " + num_hex(vt - g_base) + ": +0x38 -> " + num_hex(reinterpret_cast<uintptr_t>(v[7]) - g_base) +
+                             ", +0x50 -> " + num_hex(reinterpret_cast<uintptr_t>(v[10]) - g_base));
+                    }
+                }
+                for (auto& kv : seen) slog("handler class vt " + num_hex(kv.first - g_base) + " x" + std::to_string(kv.second));
+                std::map<uintptr_t, int> targets;
+                for (int j = 0; j < hc; ++j) {
+                    char* h = *reinterpret_cast<char**>(ha + j * 16);
+                    if (h) ++targets[*reinterpret_cast<uintptr_t*>(h + 0x30)];
+                }
+                for (auto& kv : targets) slog("handler target fn " + num_hex(kv.first - g_base) + " x" + std::to_string(kv.second));
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) { slog("handler scan faulted"); }
+    }
+    if (static bool once2 = false; !once2 && page && g_view_obj.load()) {   // diagnostics: who has a listener table (+0x28)?
+        once2 = true;
+        using TypeFn0 = void* (*)(int);
+        using IsInst  = bool (*)(void*, void*);
+        void* T = nullptr;
+        __try { T = reinterpret_cast<TypeFn0>(g_base + 0x14CB560)(0); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        const auto info = [&](void* x) -> std::string {
+            if (!x || !readable(x, 0x40)) return "(unreadable)";
+            std::string r = "vt " + num_hex(*reinterpret_cast<uintptr_t*>(x) - g_base) + " +28=" + num_hex(*reinterpret_cast<uintptr_t*>(static_cast<char*>(x) + 0x28));
+            bool inst = false;
+            __try { inst = T && reinterpret_cast<IsInst>(g_base + 0x1F85750)(x, T); } __except (EXCEPTION_EXECUTE_HANDLER) { r += " (isinst faulted)"; }
+            return r + (inst ? " isT" : " notT");
+        };
+        void* o = g_view_obj.load();
+        slog("scan: page " + info(page));
+        slog("scan: obj  " + info(o));
+        int n = 0;
+        for (void* base : {page, o}) {
+            for (std::size_t off = 0; off < 0x700 && n < 60; off += 8) {
+                void* p = *reinterpret_cast<void**>(static_cast<char*>(base) + off);
+                if (!p || p == page || p == o || !readable(p, 0x40)) continue;
+                const uintptr_t vt = *reinterpret_cast<uintptr_t*>(p);
+                if (vt < g_base || vt > g_base + 0x5000000) continue;
+                ++n;
+                slog(std::string("scan: ") + (base == page ? "page" : "obj") + "+0x" + num_hex(off) + " -> " + info(p));
+            }
+        }
+    }
+    if (static bool once = false; !once && page && g_view_obj.load()) {   // diagnostics: how the page and the getter's object relate
+        once = true;
+        void* o = g_view_obj.load();
+        std::string line = "relation: page vt " + std::to_string(*reinterpret_cast<uintptr_t*>(page) - g_base) + ", obj vt " +
+                           std::to_string(*reinterpret_cast<uintptr_t*>(o) - g_base) + "; page holds obj at";
+        __try {
+            for (std::size_t off = 0; off < 0x800; off += 8)
+                if (*reinterpret_cast<void**>(static_cast<char*>(page) + off) == o) line += " 0x" + num_hex(off);
+            line += "; obj holds page at";
+            for (std::size_t off = 0; off < 0x800; off += 8)
+                if (*reinterpret_cast<void**>(static_cast<char*>(o) + off) == page) line += " 0x" + num_hex(off);
+        } __except (EXCEPTION_EXECUTE_HANDLER) { line += " (fault)"; }
+        slog(line);
+    }
     if (page && page != g_view_obj.load()) {   // diagnostics: is the getter's object not the page?
         slog("switch_view: page " + std::to_string(reinterpret_cast<uintptr_t>(page)) + " vs getter obj " +
              std::to_string(reinterpret_cast<uintptr_t>(g_view_obj.load())) + ": notifying on the page too");
@@ -3903,6 +4050,8 @@ void hook_game() {
                               reinterpret_cast<void*>(&d_find_property), reinterpret_cast<void**>(&o_find_property)) ||
         !g_api->hook_function(m, "PauseOptionsMenu: wire the tiles", reinterpret_cast<void*>(g_base + RVA_PAUSE_WIRE_TILES),
                               reinterpret_cast<void*>(&d_wire_tiles), reinterpret_cast<void**>(&o_wire_tiles)) ||
+        !g_api->hook_function(m, "the real getter (diagnostics)", reinterpret_cast<void*>(g_base + RVA_REAL_GETTER),
+                              reinterpret_cast<void*>(&d_real_getter), reinterpret_cast<void**>(&o_real_getter)) ||
         !g_api->hook_function(m, "HUD options scene record", reinterpret_cast<void*>(g_base + RVA_HUD_SCENE_RECORD),
                               reinterpret_cast<void*>(&d_hud_scene), reinterpret_cast<void**>(&o_hud_scene)) ||
         !g_api->enable_hooks(m, nullptr)) {
