@@ -1044,7 +1044,7 @@ DWORD WINAPI load_mods(LPVOID) {
         std::scoped_lock lk{g_mu};
         for (const auto& t : read_manifest()) {
             bool edited = false;
-            for (const auto& m : g_mods) edited = edited || m->set.count(t) || m->repl.count(t);
+            for (const auto& m : g_mods) edited = edited || m->set.count(t) || m->repl.count(t) || m->add.count(t);
             if (!edited && t != "main.str") g_dirty.insert(t);
         }
     }
