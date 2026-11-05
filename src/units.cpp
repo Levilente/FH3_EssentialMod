@@ -44,24 +44,20 @@ std::atomic<bool> g_started{false};
 
 std::wstring ini_path() { return (azimuth_dir() / L"fh3-mods" / L"platform-units.ini").wstring(); }
 
-uint8_t* table() {
-    __try {
-        auto* base = reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr));
-        auto* p    = *reinterpret_cast<uint8_t**>(base + RVA_UNIT_TABLE);
-        return p;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return nullptr;
-    }
-}
-
-uint8_t* row(uint8_t* t, int sys, int kind) { return t + kRowSize * (sys * kKinds + kind) + 8; }
-
 bool readable(const void* p, std::size_t n) {
     MEMORY_BASIC_INFORMATION mbi{};
     if (!VirtualQuery(p, &mbi, sizeof mbi) || mbi.State != MEM_COMMIT) return false;
     if (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) return false;
     return static_cast<const uint8_t*>(p) + n <= static_cast<const uint8_t*>(mbi.BaseAddress) + mbi.RegionSize;
 }
+
+uint8_t* table() {
+    auto* base = reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr));
+    if (!readable(base + RVA_UNIT_TABLE, 8)) return nullptr;
+    return *reinterpret_cast<uint8_t**>(base + RVA_UNIT_TABLE);
+}
+
+uint8_t* row(uint8_t* t, int sys, int kind) { return t + kRowSize * (sys * kKinds + kind) + 8; }
 
 bool is_speed(uint32_t id) { return id == U_MPH || id == U_KMH; }
 bool is_power(uint32_t id) { return id == U_HP || id == U_W || id == U_KW || id == U_PS; }
@@ -151,14 +147,18 @@ void worker() {
             std::snprintf(b, sizeof b, "table pointer %p, readable %d, snapshot %d", static_cast<void*>(t), t && readable(t, 64) ? 1 : 0, have ? 1 : 0);
             log_line("units", b);
             auto* base = reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr));
-            std::string q = "module " + std::to_string(reinterpret_cast<std::uintptr_t>(base)) + " qwords from +0x4E7DD90:";
-            for (int i = 0; i < 8; ++i) {
-                unsigned long long v = 0;
-                __try { v = *reinterpret_cast<unsigned long long*>(base + 0x4E7DD90 + 8 * i); } __except (EXCEPTION_EXECUTE_HANDLER) { v = 0xDEAD; }
-                char h[32];
-                std::snprintf(h, sizeof h, " %llx", v);
-                q += h;
-            }
+            MEMORY_BASIC_INFORMATION mbi{};
+            const bool ok = VirtualQuery(base + 0x4E7DD90, &mbi, sizeof mbi) != 0;
+            std::string q = "module " + std::to_string(reinterpret_cast<std::uintptr_t>(base)) + ", query " + (ok ? "ok" : "failed") +
+                            ", state " + std::to_string(ok ? mbi.State : 0) + ", protect " + std::to_string(ok ? mbi.Protect : 0) +
+                            ", region " + std::to_string(ok ? reinterpret_cast<std::uintptr_t>(mbi.BaseAddress) : 0) + "+" +
+                            std::to_string(ok ? mbi.RegionSize : 0) + ", qwords:";
+            if (readable(base + 0x4E7DD90, 64))
+                for (int i = 0; i < 8; ++i) {
+                    char h[32];
+                    std::snprintf(h, sizeof h, " %llx", *reinterpret_cast<unsigned long long*>(base + 0x4E7DD90 + 8 * i));
+                    q += h;
+                }
             log_line("units", q);
         }
         ++idle;
