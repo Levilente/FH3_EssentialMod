@@ -2054,8 +2054,9 @@ std::vector<PageItem> updates_items() {
 
 // About: the platform, Extra Options, the mods folder, reporting a problem, and credits. A
 // opens each row's page (or the folder); g_about_urls has them, "" for a row without one.
-constexpr const char* kPlatformGitHub = "github.com/Trinculo54/fh2-mod-platform";
-constexpr const char* kAuthorGitHub   = "github.com/Trinculo54";
+constexpr const char* kPlatformGitHub = "github.com/Levilente/FH3_ModPlatform";
+constexpr const char* kExtraOptionsGitHub = "github.com/RokkuDayo/ForzaHorizon2_ExtraOptions";
+constexpr const char* kAuthorGitHub   = "github.com/Levilente";
 std::vector<std::string> g_about_urls;
 
 std::string mods_folder() { return narrow((azimuth_dir() / L"fh3-mods").wstring()); }
@@ -2073,6 +2074,19 @@ std::vector<PageItem> about_items() {
     items.push_back(platform);
     urls.push_back(std::string("https://") + kPlatformGitHub);
 
+    // Extra Options: installed or not, and its version when its log says.
+    {
+        const std::string eo = extra_options_line();
+        PageItem item = info("Extra Options",
+                             eo.empty() ? "Extra Options is not installed. It adds camera, HUD, garage and menu extras to Forza "
+                                          "Horizon 3, and the platform works with or without it. Press A to open its GitHub page."
+                                        : "Extra Options is installed and running next to the platform. Press A to open its GitHub page.");
+        (eo.empty() ? item.value_alert : item.value) = eo.empty() ? "Not installed" : eo;
+        item.link = kExtraOptionsGitHub;
+        items.push_back(item);
+        urls.push_back(std::string("https://") + kExtraOptionsGitHub);
+    }
+
     const std::string folder = mods_folder();
     PageItem open = info("Open mods folder", "Opens fh3-mods in File Explorer, to add, remove or swap mods. Mods you add there "
                                              "load the next time you start the game.");
@@ -2087,8 +2101,8 @@ std::vector<PageItem> about_items() {
     items.push_back(report);
     urls.push_back(std::string("https://") + kPlatformGitHub + "/issues");
 
-    PageItem credits = info("Credits", "FH3 mod platform by Levilente, based on the FH2 mod platform by Trinculo54. Press A to open the FH2 platform's GitHub page.");
-    credits.value = "Levilente, @Trinculo54";
+    PageItem credits = info("Credits", "FH3 mod platform by Levilente, based on the FH2 mod platform by Trinculo54. Press A to open the author's GitHub page.");
+    credits.value = "Levilente";
     credits.link  = kAuthorGitHub;
     items.push_back(credits);
     urls.push_back(std::string("https://") + kAuthorGitHub);
