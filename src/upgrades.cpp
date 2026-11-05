@@ -366,7 +366,10 @@ bool rewrite(const char* z, size_t len, std::string& out) {
 typedef int (*PrepareFn)(void*, const char*, int, unsigned, void*, void**, const char**);
 PrepareFn g_orig_prepare = nullptr;
 
+std::atomic<void*> g_live_db{nullptr};   // the connection the game keeps the profile in (seen on its Profile0_ statements)
+
 int detour_prepare(void* db, const char* z, int n, unsigned fl, void* old, void** pp, const char** tail) {
+    if (db && z && readable(z, 24) && strncmp(z, "UPDATE Profile0_", 16) == 0) g_live_db.store(db);
     if (!t_in_repair && !g_repaired.load()) repair_save(db, z);
     if (z && readable(z, 64) && g_count.load() > 0) {
         const size_t len = n < 0 ? strlen(z) : static_cast<size_t>(n);
@@ -736,5 +739,12 @@ void upgrades_import(int handle, int32_t garage, int32_t ordinal, int stage, uin
     c.ord   = ordinal > 0 ? ordinal : c.ord;
     save_car(u, garage, c);
 }
+
+// The sell-car module needs the SQL hook even when no upgrade is registered.
+void upgrades_start_hooks() {
+    if (!g_started.exchange(true)) std::thread(install_hooks).detach();
+}
+void* upgrades_live_db() { return g_live_db.load(); }
+
 
 }  // namespace fh3platform

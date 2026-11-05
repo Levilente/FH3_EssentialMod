@@ -45,6 +45,10 @@ int upgrades_register(FH3Mod* mod, const FH3UpgradeDef* def, const std::function
 int upgrades_stage(int handle, int32_t garage);
 uint32_t upgrades_active_garage();
 void upgrades_import(int handle, int32_t garage, int32_t ordinal, int stage, uint32_t owned_mask);
+void upgrades_start_hooks();
+void* upgrades_live_db();
+// sellcar.cpp: SELL CAR in the garage's car menu.
+void sellcar_start();
 // intro_skip.cpp: the start-up video is skipped.
 void start_intro_skip();
 // mods_page.cpp: takes over the MODS tile on the Home tab.
