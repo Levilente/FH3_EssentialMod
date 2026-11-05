@@ -146,6 +146,12 @@ void worker() {
     int idle  = 0;
     for (;;) {
         uint8_t* t = table();
+        if (idle < 6 || (idle % 30) == 0) {
+            char b[120];
+            std::snprintf(b, sizeof b, "table pointer %p, readable %d, snapshot %d", static_cast<void*>(t), t && readable(t, 64) ? 1 : 0, have ? 1 : 0);
+            log_line("units", b);
+        }
+        ++idle;
         if (t && readable(t, 64)) {
             if (!have) have = take_snapshot(t);
             // the table is checked now and then: if the game loads it again, the choice goes back in
