@@ -150,6 +150,16 @@ void worker() {
             char b[120];
             std::snprintf(b, sizeof b, "table pointer %p, readable %d, snapshot %d", static_cast<void*>(t), t && readable(t, 64) ? 1 : 0, have ? 1 : 0);
             log_line("units", b);
+            auto* base = reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr));
+            std::string q = "module " + std::to_string(reinterpret_cast<std::uintptr_t>(base)) + " qwords from +0x4E7DD90:";
+            for (int i = 0; i < 8; ++i) {
+                unsigned long long v = 0;
+                __try { v = *reinterpret_cast<unsigned long long*>(base + 0x4E7DD90 + 8 * i); } __except (EXCEPTION_EXECUTE_HANDLER) { v = 0xDEAD; }
+                char h[32];
+                std::snprintf(h, sizeof h, " %llx", v);
+                q += h;
+            }
+            log_line("units", q);
         }
         ++idle;
         if (t && readable(t, 64)) {
