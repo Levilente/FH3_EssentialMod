@@ -39,6 +39,12 @@ inline void plog(const std::string& text) { log_line("", text); }
 // hooks.cpp: hooks a function of the game for the platform itself (blocks until the game's code is ready, so call
 // it from its own thread). Returns the trampoline to the original, or nullptr.
 void* hook_game_function(uint32_t rva, void* detour, const char* what, void** original = nullptr);
+// upgrades.cpp: the upgrade bridge (API 11).
+int upgrades_register(FH3Mod* mod, const FH3UpgradeDef* def, const std::function<void(const char*, uint32_t, const wchar_t*)>& add_key,
+                      const std::function<void(const std::string&)>& add_sql);
+int upgrades_stage(int handle, int32_t garage);
+uint32_t upgrades_active_garage();
+void upgrades_import(int handle, int32_t garage, int32_t ordinal, int stage, uint32_t owned_mask);
 // intro_skip.cpp: the start-up video is skipped.
 void start_intro_skip();
 // mods_page.cpp: takes over the MODS tile on the Home tab.

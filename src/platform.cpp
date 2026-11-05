@@ -580,6 +580,14 @@ void api_add_sql(FH3Mod* m, const char* sql) {
     m->sql.emplace_back(sql);
 }
 
+int api_register_upgrade(FH3Mod* m, const FH3UpgradeDef* d) {
+    return upgrades_register(
+        m, d, [m](const char* t, uint32_t k, const wchar_t* x) { api_add_string_key(m, t, k, x); }, [m](const std::string& q) { api_add_sql(m, q.c_str()); });
+}
+int api_upgrade_stage(FH3Mod*, int h, int32_t g) { return upgrades_stage(h, g); }
+uint32_t api_upgrade_active_garage() { return upgrades_active_garage(); }
+void api_upgrade_import(FH3Mod*, int h, int32_t g, int32_t o, int s, uint32_t m) { upgrades_import(h, g, o, s, m); }
+
 void api_clear_sql(FH3Mod* m) {
     if (!m) return;
     std::scoped_lock lk{g_mu};
@@ -1325,6 +1333,10 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
                 g_api.add_hotkey        = hotkey_add;
                 g_api.add_command       = command_add;
                 g_api.add_string_key    = api_add_string_key;
+                g_api.register_upgrade  = api_register_upgrade;
+                g_api.upgrade_stage     = api_upgrade_stage;
+                g_api.upgrade_active_garage = api_upgrade_active_garage;
+                g_api.upgrade_import    = api_upgrade_import;
                 return load_mods(nullptr);
             },
             nullptr, 0, nullptr))

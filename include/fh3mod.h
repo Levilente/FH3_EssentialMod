@@ -33,7 +33,7 @@
 extern "C" {
 #endif
 
-#define FH3MOD_API_VERSION 10
+#define FH3MOD_API_VERSION 11
 
 #ifdef __cplusplus
 #define FH3MOD_EXPORT extern "C" __declspec(dllexport)
@@ -99,6 +99,32 @@ typedef struct FH3ModInfo {
        ignore it. */
     int offline_only;
 } FH3ModInfo;
+
+/* ---- Custom upgrades (API 11, register_upgrade) ---- */
+typedef struct FH3UpgradeStage {
+    const wchar_t* name;          /* "Street Nitrous Kit" */
+    const wchar_t* description;
+    int32_t price;                /* credits; ignored for stage 0 (stock is free) */
+    const char* icon;             /* game path of the small icon, e.g. "GAME:\\Media\\UI\\Textures\\Data_Bound\\Upgrade_Parts\\Custom\\x_Icon.swatchbin"; NULL = the game's default */
+    const char* icon_large;       /* the large one, or NULL */
+} FH3UpgradeStage;
+/* Called (game thread) when the stage on a car is known or changes: the car being driven changed, or a stage was
+   installed. `garage` is the car's garage id. Keep it short and non-blocking. */
+typedef void (*FH3UpgradeStageFn)(void* user, uint32_t garage, int stage);
+typedef struct FH3UpgradeDef {
+    uint32_t size;                /* sizeof(FH3UpgradeDef) */
+    const char* id;               /* stable key of this upgrade, e.g. "nitrosystem2.kit" (letters, digits, '.', '_') */
+    const wchar_t* name;          /* the type's name: "Nitrous Kit" */
+    const wchar_t* description;
+    int32_t area;                 /* UpgradeAreas id: 1 Engine (0 = 1), 4 Tires and rims, 8 Conversion */
+    const char* icon;             /* the type's icons (game paths) or NULL */
+    const char* icon_large;
+    int32_t stage_count;          /* 2 to 10, stage 0 is stock */
+    const FH3UpgradeStage* stages;
+    FH3UpgradeStageFn on_stage;   /* may be NULL */
+    void* user;
+    int32_t preferred_slot;       /* -1 = any; a mod moving its old upgrade over asks for the slot it had (0 = the first) */
+} FH3UpgradeDef;
 
 typedef struct FH3ModApi {
     uint32_t size;                /* sizeof(FH3ModApi) as the platform knows it */
@@ -515,6 +541,23 @@ typedef struct FH3ModApi {
        ((uint64_t)table_hash << 32) | key; FH3_TABLE_UPGRADES and FH3_TABLE_UPGRADETYPES are the table hashes
        of the two tables upgrade names and descriptions live in. */
     void (*add_string_key)(FH3Mod* mod, const char* table, uint32_t key, const wchar_t* text);
+    /* ==== API version 11: check api_version >= 11 ======================== */
+
+    /* Custom upgrades (the upgrade bridge). A mod describes an upgrade type (name, description, icons, area, stages
+       with names, descriptions and prices) and the platform does the rest: it hands out the ids (part enum, type,
+       upgrade and part ids; remembered by `id` in fh3-mods\platform-upgrades.ini), writes the database rows and
+       the texts, shows the type in Garage > Upgrades, runs the basket, purchase and "install this setup?" prompt,
+       and remembers each car's stage and owned stages. Stage 0 is the stock stage: always owned and fitted on
+       every car until another stage is bought. Call from fh3mod_init. Returns a handle (>= 0) or -1 (the log
+       says why). Up to 8 upgrades in all, up to 10 stages each. */
+    int (*register_upgrade)(FH3Mod* mod, const FH3UpgradeDef* def);
+    /* The stage fitted on the car with that garage id (0 = stock), or on the car being driven if garage <= 0. */
+    int (*upgrade_stage)(FH3Mod* mod, int handle, int32_t garage);
+    /* The garage id of the car being driven (0 = not known yet). */
+    uint32_t (*upgrade_active_garage)(void);
+    /* One-time move of a mod's own earlier per-car data to the platform: car `garage` (model `ordinal`, 0 if not
+       known) had `stage` fitted and owns the stages whose bits are set in `owned_mask` (bit n = stage n). */
+    void (*upgrade_import)(FH3Mod* mod, int handle, int32_t garage, int32_t ordinal, int stage, uint32_t owned_mask);
 } FH3ModApi;
 
 #define FH3_TABLE_UPGRADES 0x968719E9u      /* Upgrades.str: Upgrades.Name / Description */
