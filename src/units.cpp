@@ -9,6 +9,7 @@
 #include "platform.hpp"
 
 #include <windows.h>
+#include <cstdio>
 
 #include <atomic>
 #include <chrono>
@@ -82,6 +83,22 @@ bool take_snapshot(uint8_t* t) {
             else if (is_power(id)) s.push_back({sys, k, id, fmt, label, true});
         }
     }
+    {
+        char b[160];
+        std::snprintf(b, sizeof b, "unit table at %p: %zu speed/power rows", static_cast<void*>(t), s.size());
+        log_line("units", b);
+        for (int sys = 0; sys < kSystems && readable(row(t, sys, 0), kRowSize); ++sys) {
+            std::string ids;
+            for (int k = 0; k < kKinds; ++k) {
+                uint32_t id;
+                std::memcpy(&id, row(t, sys, k) + 4, 4);
+                ids += std::to_string(id) + " ";
+            }
+            log_line("units", "system " + std::to_string(sys) + " ids: " + ids);
+        }
+        for (const Snap& r : s)
+            log_line("units", "row sys " + std::to_string(r.sys) + " kind " + std::to_string(r.kind) + " id " + std::to_string(r.id));
+    }
     if (s.empty()) return false;
     std::scoped_lock lk{g_mu};
     g_snap = std::move(s);
@@ -113,6 +130,8 @@ void write_rows(uint8_t* t) {
             const Snap& use = donor ? *donor : s;
             uint8_t* r      = row(t, s.sys, s.kind);
             __try {
+                if (*reinterpret_cast<uint32_t*>(r + 4) != use.id)
+                    log_line("units", "sys " + std::to_string(s.sys) + " kind " + std::to_string(s.kind) + ": " + std::to_string(s.id) + " -> " + std::to_string(use.id));
                 if (*reinterpret_cast<uint32_t*>(r + 4) != use.id) *reinterpret_cast<uint32_t*>(r + 4) = use.id;
                 if (*reinterpret_cast<uint32_t*>(r + 8) != use.fmt) *reinterpret_cast<uint32_t*>(r + 8) = use.fmt;
                 if (*reinterpret_cast<uint32_t*>(r + 0x10) != use.label) *reinterpret_cast<uint32_t*>(r + 0x10) = use.label;
