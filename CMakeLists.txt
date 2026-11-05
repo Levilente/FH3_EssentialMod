@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 # Bump VERSION before tagging a release (the tag build checks they match).
-project(fh3_mod_platform VERSION 0.1.0 LANGUAGES C CXX RC)
+project(fh3_mod_platform VERSION 1.0.0 LANGUAGES C CXX RC)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,7 +14,7 @@ endif()
 # When this repo is added to a mod with add_subdirectory(), the mod gets:
 #   fh3mod_platform        the d3dcompiler_47.dll to ship next to azimuth.exe
 #   fh3mod_api             interface target with include/fh3mod.h
-#   FH3MOD_PLATFORM_VERSION_STRING   "2.0.0", to pass in FH3ModInfo
+#   FH3MOD_PLATFORM_VERSION_STRING   "1.0.0", to pass in FH3ModInfo
 set(FH3MOD_PLATFORM_VERSION ${PROJECT_VERSION})
 set(FH3MOD_PLATFORM_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
 set(FH3MOD_PLATFORM_VERSION_MINOR ${PROJECT_VERSION_MINOR})

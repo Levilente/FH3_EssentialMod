@@ -2,7 +2,7 @@ name: Build
 
 # Every push and pull request builds the mod and uploads dist/ as an
 # artifact. Pushing a version tag (v1.0.0, v1.2.3, ...) also attaches
-# FH2-Mod-Platform-<tag>.zip to the release with that name (a new draft if
+# FH3-Mod-Platform-<tag>.zip to the release with that name (a new draft if
 # there isn't one yet), unless a zip is already attached.
 
 on:
@@ -57,9 +57,9 @@ jobs:
               echo "::error::Tag $GITHUB_REF_NAME doesn't match VERSION $version in CMakeLists.txt; bump it first."
               exit 1
             fi
-            echo "name=FH2-Mod-Platform-${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "name=FH3-Mod-Platform-${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           else
-            echo "name=FH2-Mod-Platform-v${version}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "name=FH3-Mod-Platform-v${version}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Upload dist/

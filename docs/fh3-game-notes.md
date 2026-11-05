@@ -1,8 +1,9 @@
-# FH3 (Xbox One build) – recon notes for the unified mod platform
+# FH3 (Xbox One build) – notes on the game's code and menus
 
-Source: `forza_durango_release_final.exe` supplied by the user, 85 425 664 bytes. Everything below was read
-from the file on disk (PE headers, strings, RTTI). Nothing here was run in the game. Offsets are RVAs
-(add `0x140000000`, the preferred base Azimuth maps it at, as with FH2).
+Source: `forza_durango_release_final.exe`, 85 425 664 bytes. The first sections were read from the file on disk
+(PE headers, strings, RTTI); the later ones (Mods pages, upgrade bridge, units, Sell Car) were checked in the running
+game while the platform was built. Offsets are RVAs: Azimuth maps the game's code at its own address, which is what
+`find_game()` returns, so add that, not the launcher's module base.
 
 ## Identification (for the platform's game detector)
 
@@ -225,3 +226,42 @@ FH2 hooks to find again in FH3:
 6. `HUDStatusSpeedometer` tick 0xAD6070 (+ property getters 0xADD560/0xADD620, raise 0xAD1A80) - NOS gauge; HUD XAML/swatchbin textures.
 7. Upgrade (Nitrous Kit stages): game database rows via the platform's SQL service; per-car stage storage.
 8. Settings on the MODS page (platform settings API: sliders, toggles).
+
+## Units: speed and power on their own (platform 1.0.0)
+
+The Units option (Settings > HUD and Gameplay) only chooses a unit *system*; everything shown (speed, power, torque,
+distance...) then comes from one table of rows. The `.data` pointer at `0x4E7DDB0` points to it: rows of 20 bytes at
+`T + 20 * (system * 35 + kind) + 8`, with the unit id at `+0xC`, the number-format hash at `+0x10` and the label hash at
+`+0x18` (readers at `0x1CA6790`, `0x1CAAA40`, `0x1CAB9C0`). The current system is `[manager + 0x2C]`, the manager at `0x4E7DDB8`;
+the option handler (`0x3479D0`) maps its three values to -1 (default by region), 0 and 2 and writes it through `0x1CB38A0`.
+Unit ids seen: 22 mph, 23 km/h, 24 m/s, 25 hp, 26 W, 27 kW, 28 PS. The platform copies the id, format and label of a donor
+row (a row of any system that has the unit asked for) over every speed row (ids 22/23) and every power row (25 to 28),
+and puts the game's own rows back for *Automatic*. Nothing else needs to change: the conversion follows the id.
+
+## The garage car menu and Sell Car (platform 1.0.0)
+
+The popup with a car's actions in Garage > My Cars is built by `0x143C320` (`this` = the page, `rdx` = the context object;
+`0x143B8D0` is the shorter variant for cars whose DLC isn't owned). Each entry is made with `0x1CA7BC0(out, table 0x2E977B0, key)`
+(a text reference: vtable `0x467D8D0`, key at `+0xC`, the text is fetched by slot 7, `0x1CABFD0`, which asks the text manager)
+and `0x142AB50(out, int* tag, text)` (an item, reference count at `+0x10`, freed with `0x31EB20`), then added with slot 8 of the list's
+vtable (`0x44A7D50` -> `0x119D690(list, type, item)`). Tags: 0 get in car, 1, 6, 7, 5, 3, **2 remove car** (key global `0x4E56F70`,
+`IDS_Sell_Car_Action`, a leftover name), 8 and 9. The item-chosen handler is `0x1438CD0(page, tag, context)`, a switch over tags 0 to 9.
+The context's garage id is `ctx->vtable[8](ctx, 0x2D243CC)`. Remove car shows a confirmation whose callback is a `std::function`
+(vtable `0x45469A8`); its body is `0x142F9D0(capture)` with the capture `{page, context, garage id}`, which removes the car with
+`0x38A9E0(0x1498950(), id)`. `0x1498950()` returns the session whose `+8` is the account; credits are read with
+`0x323A00(account, tmp, 0x2D39008)` -> `0x1A2FDA0`, released with `0x1A2DFF0`, and set with `0x337440(account, credits, reason)`.
+The popup's title is the key at `0x4E56F64` ("Select an action"), which is how Sell Car puts the price in it.
+
+The game's string keys are not constants in the code: each `IDS_...` name is hashed at start-up (`0x1CABB60(name)`) into a
+global; the names are in the `.str` files (`IDS_Sell_Car_Action` is "REMOVE CAR FROM GARAGE").
+
+## The upgrade bridge (platform 1.0.0)
+
+See [api.md](api.md#custom-upgrades-the-upgrade-bridge-api-11) for what mods see. Underneath, for slot `i` (0 to 7): part enum `47 + i`,
+UpgradeTypes id `7452 + i`, Upgrades id `74520 + 10 i + stage`, part id `900470 + 10 i + stage`, string keys from `0x4E530000 + slot * 0x100`.
+The game builds its shop queries with an if-chain over the part enum 0 to 42 (an enum above 42 builds nothing), so both query builders
+(`0x37E980`, `0x410750`) get 42 instead. The platform hooks `sqlite3LockAndPrepare` (`0x440C0`) to rewrite the part and view queries and to
+add rows, the shop's add / differ / commit / abandon steps (`0x16FAEF0`, `0x19CDBB0`, `0x4081A0`, `0x16C8C70`), the A handler (`0x16DC050`), the `memcmp`
+thunk (`0x1802D82`), and patches the basket check (`0x16FB341`). Purchases call the credits functions above plus the purchased-parts row writer
+`0x36BDA0` and the garage-id getter `0x37AA10`. The game forgets a part when another one of the same type is fitted, so the owned stages are written
+back to `Profile0_Career_PurchasedParts` whenever the shop asks about them.

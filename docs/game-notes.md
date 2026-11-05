@@ -1,5 +1,7 @@
 # Notes on the game
 
+> **FH2 reference.** These notes are inherited from the FH2 platform and describe Forza Horizon 2. For Forza Horizon 3 see [fh3-game-notes.md](fh3-game-notes.md).
+
 What's been worked out about Forza Horizon 2 on PC while building the mods so far. Addresses are offsets from the game's base address (RVAs), since `wait_for_game()` gives you the base. Everything here was found in the one build everyone plays; treat it as a starting point and check before you patch.
 
 ## The build and Azimuth

@@ -1,6 +1,10 @@
 # API reference
 
-Everything is in [`include/fh3mod.h`](../include/fh3mod.h). This page goes through it member by member. API version 1 came with platform 2.0, version 2 with 2.1, 3 with 2.2, 4 with 2.3, 5 with 2.4, 6 with 2.5, 7 with 2.6, 8 with 2.7 and 9 with 2.8. Version 2 added file overrides, database patches and interfaces between mods, version 3 hooks, version 4 the Mods page, version 5 its sliders, version 6 mod descriptions and link rows for the MODS tab, version 7 byte patches and instruction hooks, version 8 pages of your own, and version 9 title-screen entries, choice rows and online play (FH2MP); the sections for those say so.
+Everything is in [`include/fh3mod.h`](../include/fh3mod.h). This page goes through it member by member.
+
+**API versions.** The numbering continues the FH2 platform's, so a mod written for it keeps its version checks: version 2 added file overrides, database patches and interfaces between mods, 3 hooks, 4 the Mods page, 5 its sliders, 6 mod descriptions and link rows, 7 byte patches and instruction hooks, 8 pages of your own, 9 title-screen entries, choice rows, online play (FH2MP), sessions, snapshots, hotkeys and commands, 10 `add_string_key` (strings for FH3's hashed string tables) and 11 custom garage upgrades (`register_upgrade`). The FH3 Mod Platform 1.0.0 has API version 11. Check `api->api_version` (or `api->size`) before using anything added after version 1. Where a section below says "platform 2.x", that is the FH2 platform release the feature first appeared in; the version to check is the API version.
+
+**What is not in FH3 yet.** `add_page` (pages of your own, API 8) and `add_title_entry` (title-screen entries, API 9) return 0 and say why in the log: they need game addresses that were only found for FH2. Everything else in this file works in the FH3 platform; the Mods page, its rows, update checks, file overrides, database patches and the upgrade bridge are the parts the FH3 port added or reworked.
 
 ## Rules that apply everywhere
 
@@ -731,6 +735,62 @@ api->add_command(g_mod, "debris", "debris clear: removes every broken piece now"
                      snprintf(reply, size, "clearing");
                  }, nullptr);
 ```
+
+## String-table keys (API 10)
+
+```c
+void add_string_key(FH3Mod* mod, const char* table, uint32_t key, const wchar_t* text);
+```
+
+FH3's database-backed texts (names and descriptions of upgrades, for example) live in string tables whose keys are 32-bit hashes, not the small numbers `set_string` takes. `add_string_key` adds `text` to the table named `table` (a file such as `"Upgrades.str"`) under a key you choose; pick one unlikely to clash, for example a hash of your mod's id and the text. A key the table already has is left alone. Like `set_string` the text is written for every language, applied after `fh3mod_init` and shows from the next launch. The database refers to a text as `"_&"` followed by the decimal of `((uint64_t)table_hash << 32) | key`; `FH3_TABLE_UPGRADES` (`0x968719E9`, `Upgrades.str`) and `FH3_TABLE_UPGRADETYPES` (`0x07710821`, `UpgradeTypes.str`) are the two tables upgrade names and descriptions are in. Mods that use `register_upgrade` don't need this: the bridge writes those texts itself.
+
+## Custom upgrades: the upgrade bridge (API 11)
+
+A mod describes an upgrade and the platform does the rest. `register_upgrade` takes a name, a description, an icon, the upgrade area and up to ten stages (stage 0 is stock), each with a name, description, price and icons. The platform then:
+
+- hands out the ids the game needs (part enum `47 + slot`, upgrade type, upgrade and part ids) and remembers them by your upgrade's `id` in `fh3-mods\platform-upgrades.ini`, so a mod's upgrade keeps its ids between launches and updates;
+- writes the database rows and the texts (up to 8 upgrades in all, 10 stages each);
+- shows the type in **Garage > Upgrades** under the area you chose, runs the basket, the purchase, the "install this setup?" prompt and Abandon like the game's own parts;
+- stores each car's fitted stage and the stages it owns, per garage id, in the same ini, and repairs a save that still names one of its parts when the mod is gone.
+
+```c
+typedef struct FH3UpgradeStage {
+    const wchar_t* name;
+    const wchar_t* description;
+    int32_t price;           // credits; ignored for stage 0
+    const char* icon;        // a game path (GAME:\Media\UI\Textures\...swatchbin) or NULL for the default
+    const char* icon_large;  // the large one, or NULL
+} FH3UpgradeStage;
+
+typedef void (*FH3UpgradeStageFn)(void* user, uint32_t garage, int stage);
+
+typedef struct FH3UpgradeDef {
+    uint32_t size;               // sizeof(FH3UpgradeDef)
+    const char* id;              // stable key, e.g. "nitrosystem2.kit"
+    const wchar_t* name;
+    const wchar_t* description;
+    int32_t area;                // 1 Engine (0 = 1), 4 Tires and rims, 8 Conversion
+    const char* icon;
+    const char* icon_large;
+    int32_t stage_count;         // 2 to 10
+    const FH3UpgradeStage* stages;
+    FH3UpgradeStageFn on_stage;  // may be NULL
+    void* user;
+    int32_t preferred_slot;      // -1 = any; a mod moving an older upgrade over asks for the slot it had
+} FH3UpgradeDef;
+
+int      register_upgrade(FH3Mod* mod, const FH3UpgradeDef* def);
+int      upgrade_stage(FH3Mod* mod, int handle, int32_t garage);
+uint32_t upgrade_active_garage(void);
+void     upgrade_import(FH3Mod* mod, int handle, int32_t garage, int32_t ordinal, int stage, uint32_t owned_mask);
+```
+
+- `register_upgrade` (call it from `fh3mod_init`) returns a handle (the slot, 0 or more) or -1; the log says why. `size` must be `sizeof(FH3UpgradeDef)`.
+- `on_stage` is called on the game's thread when the stage on a car becomes known or changes: the player drove another car, or a stage was installed. Keep it short.
+- `upgrade_stage` is the stage fitted on the car with that garage id (0 is stock), or on the car being driven if `garage <= 0`; `upgrade_active_garage` is the garage id of the car being driven (0 until known).
+- `upgrade_import` moves a mod's own earlier per-car data to the platform once: car `garage` (model `ordinal`, or 0) had `stage` fitted and owns the stages whose bits are set in `owned_mask`. NitroSystem II uses it to bring its FH2-style per-car stages over.
+
+Stage prices are charged by the platform when the player confirms the setup in the shop; stages that were bought stay owned, and switching back to an owned stage is free.
 
 ## Crash reports
 

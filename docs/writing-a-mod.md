@@ -1,5 +1,7 @@
 # Writing a mod
 
+> **Starting point.** This guide came from the FH2 platform; wherever it says FH2 or `fh2-mods`, the FH3 platform uses `fh3-mods` and `fh3mod.h`. Custom garage upgrades (`register_upgrade`) and choice rows are described in [api.md](api.md).
+
 This walks through making an FH2 mod on the platform, from an empty folder to a zip players can install. The example is [`examples/hello_mod`](../examples/hello_mod/hello_mod.cpp); copying it is a fine way to start.
 
 ## What you need

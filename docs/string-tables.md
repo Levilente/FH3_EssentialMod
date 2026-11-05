@@ -1,5 +1,7 @@
 # String tables
 
+> **FH2 notes.** These describe FH2's string tables. FH3 keeps its database-backed texts in hashed tables: see `add_string_key` in [api.md](api.md#string-table-keys-api-10).
+
 Nearly every piece of text in FH2 lives in a string table: menus, car names, loading messages, AI driver names. Changing them is the easiest way for a mod to put something on screen, and the platform does the file work for you.
 
 ## Where they are
