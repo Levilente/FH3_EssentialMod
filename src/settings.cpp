@@ -1015,13 +1015,18 @@ std::string slider_resources(const Row& r, std::size_t i) {
 // can't; this shows each name by the slider's Value instead, as the game's own rating slider shows
 // its stars (F606_RateDialog.xaml: Trigger Property="Value" Value="1", ...). The Track is there,
 // unseen, for the Slider's own workings.
+std::string upper_ascii(std::string t) {
+    for (char& c : t) if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 32);
+    return t;
+}
+
 std::string choice_resources(const Row& r, std::size_t i) {
     const std::string n    = std::to_string(i);
     const std::size_t last = r.choices.size() - 1;
     std::string names, triggers;
     for (std::size_t c = 0; c <= last; ++c) {
         names += "                                        <local:FZTextBlock x:Name=\"FH3Mod_Choice_" + std::to_string(c) + "\" Text=\"" +
-                 xml_escape(r.choices[c]) + "\" Style=\"{StaticResource A_Style_SliderControlText}\" HorizontalAlignment=\"Center\"" +
+                 xml_escape(upper_ascii(r.choices[c])) + "\" Style=\"{StaticResource A_Style_FZTextBlock_SpinnerItem}\" HorizontalAlignment=\"Center\"" +
                  (c ? " Visibility=\"Hidden\"" : "") + " />\r\n";
         std::string set;
         if (c == 0) set += "                                    <Setter TargetName=\"LeftArrow\" Property=\"Visibility\" Value=\"Hidden\" />\r\n";
@@ -1043,10 +1048,10 @@ std::string choice_resources(const Row& r, std::size_t i) {
            "                    <Setter.Value>\r\n"
            "                        <ControlTemplate TargetType=\"Slider\">\r\n"
            "                            <Grid FocusManager.IsFocusScope=\"True\" VerticalAlignment=\"Center\">\r\n"
-           "                                <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>\r\n"
+           "                                <Grid.ColumnDefinitions><ColumnDefinition Width=\"*\" /><ColumnDefinition Width=\"375\" /></Grid.ColumnDefinitions>\r\n"
            "                                <local:FZTextBlock x:Name=\"PART_Label\" Text=\"{Binding Tag.Heading, RelativeSource={RelativeSource TemplatedParent}}\" "
-           "Style=\"{StaticResource A_Style_SliderControlText}\" HorizontalAlignment=\"Left\" />\r\n"
-           "                                <Grid Grid.Column=\"1\">\r\n"
+           "Style=\"{StaticResource A_Style_FZTextBlock_SpinnerTitle}\" HorizontalAlignment=\"Left\" />\r\n"
+           "                                <Grid Grid.Column=\"1\" Margin=\"0,0,-15,0\">\r\n"
            "                                    <Track x:Name=\"PART_Track\" Opacity=\"0\" />\r\n"
            "                                    <DockPanel>\r\n"
            "                                        <Grid DockPanel.Dock=\"Left\"><ContentControl x:Name=\"LeftArrow\" Style=\"{StaticResource A_Style_Arrow_Left}\" /></Grid>\r\n"
