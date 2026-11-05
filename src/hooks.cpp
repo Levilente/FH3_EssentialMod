@@ -332,6 +332,11 @@ std::string extra_options_state() {
     CloseHandle(f);
     if (text.find("\nAZIMUTH: winmm proxy initialized") != std::string::npos)
         return "Extra Options has applied its patches";
+    // Extra Options for FH3 writes its status as a later line ("OK: FH3 Extra Options initialized ...").
+    if (text.find("\nOK: FH3 Extra Options initialized") != std::string::npos || text.find("\nFILES: native mounts ready") != std::string::npos)
+        return "Extra Options has applied its patches";
+    if (text.find("\nREFUSED:") != std::string::npos || text.find("\nDISABLED:") != std::string::npos)
+        return "Extra Options made no patches this time";
     const auto nl = text.find('\n');
     const std::string status = nl == std::string::npos ? std::string{} : text.substr(nl + 1, 10);
     if (status.rfind("OK:", 0) == 0) return "Extra Options has applied its patches";

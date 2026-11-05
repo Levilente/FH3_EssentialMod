@@ -552,7 +552,7 @@ void write_mods_page(const std::string& header, const std::string& rows) {
     g_mods_header = header;
     g_mods_rows   = rows;
     if (game_mount().empty()) return;
-    const fs::path target = game_mount() / kOverlayFolder / L"UI" / L"Scenes" / L"Anthem" / L"A_PlaceholderTextScene.xaml";
+    const fs::path target = game_mount() / overlay_folder() / L"UI" / L"Scenes" / L"Anthem" / L"A_PlaceholderTextScene.xaml";
     std::error_code ec;
     if (!fs::exists(target, ec)) return; // the overlay isn't in use
     const std::string x = placeholder_xaml();
@@ -560,6 +560,8 @@ void write_mods_page(const std::string& header, const std::string& rows) {
     f.write(x.data(), static_cast<std::streamsize>(x.size()));
     plog(f ? "Mods page: written" : "Mods page: couldn't write " + target.string());
 }
+
+const wchar_t* overlay_folder() { return extra_options_dir().empty() ? kOverlayFolder : L"mediaoverride"; }
 
 std::filesystem::path build_ui_overlay() {
     // (kOverlayFolder is declared in platform.hpp)
@@ -571,7 +573,8 @@ std::filesystem::path build_ui_overlay() {
     }
     // Azimuth only takes content paths under game:\ with no ".." in them (it stops the game otherwise), so the
     // overlay can't live in fh3-mods; it's the platform's own folder next to media\ and mediaoverride\.
-    const fs::path root = game_mount() / kOverlayFolder;
+    const fs::path root = game_mount() / overlay_folder();
+    const bool shared   = !extra_options_dir().empty(); // root is mediaoverride: its other files are not ours
     fs::remove_all(azimuth_dir() / L"fh3-mods" / L"overlay", ec); // where the first build put it
     bool any = false;
     std::vector<fs::path> kept;
@@ -612,9 +615,11 @@ std::filesystem::path build_ui_overlay() {
     }
     // Files an earlier version of the platform put here and this one doesn't make any more.
     std::vector<fs::path> stale;
-    for (auto it = fs::recursive_directory_iterator(root, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec))
-        if (it->is_regular_file(ec) && std::find(kept.begin(), kept.end(), it->path().lexically_normal()) == kept.end())
-            stale.push_back(it->path());
+    if (shared) fs::remove_all(game_mount() / kOverlayFolder, ec);   // the platform's own folder isn't used with Extra Options
+    else
+        for (auto it = fs::recursive_directory_iterator(root, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec))
+            if (it->is_regular_file(ec) && std::find(kept.begin(), kept.end(), it->path().lexically_normal()) == kept.end())
+                stale.push_back(it->path());
     for (const fs::path& f : stale) {
         fs::remove(f, ec);
         plog("ui patches: removed " + f.string() + " (no longer made)");

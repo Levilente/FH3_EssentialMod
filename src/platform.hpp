@@ -105,6 +105,9 @@ std::filesystem::path build_ui_overlay();
 // The Mods page (the placeholder page in the overlay): header and rows as XAML fragments.
 void write_mods_page(const std::string& header, const std::string& rows);
 inline constexpr const wchar_t* kOverlayFolder = L"mediaplatform"; // under the game folder; mounted as game:\mediaplatform\
+// With Extra Options the platform cannot mount its own folder (EO refuses its patches if the file lookup was changed
+// first), so the menu patches go into EO's mediaoverride instead (same layout: UI\..., stateflow\..., Stripped\...).
+const wchar_t* overlay_folder();
 
 // database.cpp: SQL patches applied to a copy of the game database.
 void apply_database(const std::vector<FH3Mod*>& mods);

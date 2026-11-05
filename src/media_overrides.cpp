@@ -364,6 +364,8 @@ void start_media_overrides() {
     }
     if (!extra_options_dir().empty()) {
         plog("media overrides: Extra Options is here, so mediaoverride is left to it");
+        // Its mounts don't include the platform's overlay, so the menu patches are written into mediaoverride.
+        if (!build_ui_overlay().empty()) start_mods_page();
         return;
     }
     plog("media overrides: Extra Options isn't loaded, so the platform mounts mediaoverride and mediapc itself");
