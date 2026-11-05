@@ -21,6 +21,8 @@ struct FH3Mod {
     // table (lower case) -> edits
     std::map<std::string, std::map<uint16_t, std::wstring>> set;
     std::map<std::string, std::map<std::wstring, std::wstring>> repl;
+    // table (lower case) -> hashed-key strings to append (API 10, add_string_key)
+    std::map<std::string, std::map<uint32_t, std::wstring>> add;
     std::vector<std::string> notice; // from set_notice
     std::vector<std::string> status; // the platform's own: update available, platform too old
     std::set<std::wstring> files;    // mediaoverride paths this mod owns (lower case)

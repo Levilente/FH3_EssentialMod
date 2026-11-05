@@ -33,7 +33,7 @@
 extern "C" {
 #endif
 
-#define FH3MOD_API_VERSION 9
+#define FH3MOD_API_VERSION 10
 
 #ifdef __cplusplus
 #define FH3MOD_EXPORT extern "C" __declspec(dllexport)
@@ -504,7 +504,21 @@ typedef struct FH3ModApi {
        run one at a time, on the platform's command thread (see
        FH3CommandFn). Returns 1 if added, 0 if not (the log says why). */
     int (*add_command)(FH3Mod* mod, const char* name, const char* help, FH3CommandFn fn, void* user);
+
+    /* ==== API version 10: check api_version >= 10 ======================== */
+
+    /* Add a string to one of the game's database-backed string tables (Upgrades.str, UpgradeTypes.str, ... -
+       the ones whose keys are 32-bit hashes, not the small numbers set_string takes), under a key of your
+       choosing (pick something unlikely to clash, e.g. a hash of your mod and text; a key the table already
+       has is left alone). Written like set_string (every language, applied after fh3mod_init, shows from
+       the next launch). The database refers to the text as "_&" followed by the decimal of
+       ((uint64_t)table_hash << 32) | key; FH3_TABLE_UPGRADES and FH3_TABLE_UPGRADETYPES are the table hashes
+       of the two tables upgrade names and descriptions live in. */
+    void (*add_string_key)(FH3Mod* mod, const char* table, uint32_t key, const wchar_t* text);
 } FH3ModApi;
+
+#define FH3_TABLE_UPGRADES 0x968719E9u      /* Upgrades.str: Upgrades.Name / Description */
+#define FH3_TABLE_UPGRADETYPES 0x07710821u  /* UpgradeTypes.str: UpgradeTypes.Name / Description */
 
 /* Called on the game's UI thread when the player changes a row: keep it
    short (save the value, flip a flag), and don't call back into the game. */

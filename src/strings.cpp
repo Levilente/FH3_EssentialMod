@@ -16,6 +16,8 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <set>
+#include <cstdio>
 
 namespace fh3platform {
 
@@ -258,6 +260,50 @@ std::vector<char> unzip_file(const fs::path& zip, std::string_view name) {
     return {};
 }
 
+std::vector<char> add_hashed(const std::vector<char>& t, const std::vector<std::pair<uint32_t, std::wstring>>& adds) {
+    if (t.size() < 0x18 || r32(t, 0) != 0x20300 || r32(t, 4) != 12) return {};
+    const uint32_t A = r32(t, 8), C = r32(t, 16), N = r32(t, 20);
+    if (N > 100000 || A > t.size() || C > A || 0x18 + 8ull * N + C != A || A + 12 > t.size()) return {};
+    const uint32_t L = r32(t, A + 4);
+    const std::size_t names = A + 12 + 8ull * N;
+    if (r32(t, A + 8) != N || r32(t, A) != 8ull * N + L || names + L != t.size()) return {};
+    std::set<uint32_t> have;
+    for (uint32_t i = 0; i < N; ++i) have.insert(r32(t, 0x18 + 8 * i));
+    std::vector<std::pair<uint32_t, std::wstring>> todo;
+    for (const auto& a : adds)
+        if (!have.count(a.first)) { todo.push_back(a); have.insert(a.first); }
+    if (todo.empty()) return t;
+    const uint32_t k = static_cast<uint32_t>(todo.size());
+    std::vector<char> blob, nblob;   // new strings and their IDS names
+    std::vector<uint32_t> off, noff;
+    auto put = [](std::vector<char>& b, const std::wstring& w) {
+        for (wchar_t c : w) { b.push_back(static_cast<char>(c & 0xFF)); b.push_back(static_cast<char>((c >> 8) & 0xFF)); }
+        b.push_back(0); b.push_back(0);
+    };
+    for (const auto& a : todo) {
+        off.push_back(C + static_cast<uint32_t>(blob.size()));
+        put(blob, a.second);
+        noff.push_back(L + static_cast<uint32_t>(nblob.size()));
+        char nm[40]; std::snprintf(nm, sizeof nm, "IDS_FH3Mod_%08X", a.first);
+        std::wstring w; for (const char* c = nm; *c; ++c) w.push_back(static_cast<wchar_t>(*c));
+        put(nblob, w);
+    }
+    const uint32_t N2 = N + k, C2 = C + static_cast<uint32_t>(blob.size()), L2 = L + static_cast<uint32_t>(nblob.size());
+    const uint32_t A2 = 0x18 + 8 * N2 + C2;
+    std::vector<char> o(A2 + 12 + 8ull * N2 + L2);
+    w32(o, 0, 0x20300); w32(o, 4, 12); w32(o, 8, A2); w32(o, 12, A2 - 24); w32(o, 16, C2); w32(o, 20, N2);
+    for (uint32_t i = 0; i < N; ++i) { w32(o, 0x18 + 8 * i, r32(t, 0x18 + 8 * i)); w32(o, 0x1C + 8 * i, r32(t, 0x1C + 8 * i)); }
+    for (uint32_t i = 0; i < k; ++i) { w32(o, 0x18 + 8 * (N + i), todo[i].first); w32(o, 0x1C + 8 * (N + i), off[i]); }
+    std::memcpy(o.data() + 0x18 + 8 * N2, t.data() + 0x18 + 8 * N, C);
+    std::memcpy(o.data() + 0x18 + 8 * N2 + C, blob.data(), blob.size());
+    w32(o, A2, 8 * N2 + L2); w32(o, A2 + 4, L2); w32(o, A2 + 8, N2);
+    for (uint32_t i = 0; i < N; ++i) { w32(o, A2 + 12 + 8 * i, r32(t, A + 12 + 8 * i)); w32(o, A2 + 16 + 8 * i, r32(t, A + 16 + 8 * i)); }
+    for (uint32_t i = 0; i < k; ++i) { w32(o, A2 + 12 + 8 * (N + i), todo[i].first); w32(o, A2 + 16 + 8 * (N + i), noff[i]); }
+    std::memcpy(o.data() + A2 + 12 + 8ull * N2, t.data() + names, L);
+    std::memcpy(o.data() + A2 + 12 + 8ull * N2 + L, nblob.data(), nblob.size());
+    return o;
+}
+
 std::vector<char> edit_lsb2(const std::vector<char>& t,
                             const std::function<std::wstring(uint16_t, const std::wstring&)>& edit, int* changed) {
     if (changed) *changed = 0;
@@ -355,6 +401,36 @@ int override_string_table(const fs::path& mount, std::string_view file,
         const auto orig = unzip_file(e.path(), file);
         if (orig.empty()) continue;
         const auto data = edit_lsb2(orig, edit);
+        if (data.empty()) continue;
+        fs::create_directories(target.parent_path(), ec);
+        const auto tmp = target.wstring() + L".tmp";
+        {
+            std::ofstream out{fs::path{tmp}, std::ios::binary | std::ios::trunc};
+            out.write(data.data(), static_cast<std::streamsize>(data.size()));
+            if (!out) continue;
+        }
+        if (MoveFileExW(tmp.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING)) ++done;
+        else DeleteFileW(tmp.c_str());
+    }
+    return done;
+}
+
+int override_hashed_table(const fs::path& mount, std::string_view file,
+                          const std::vector<std::pair<uint32_t, std::wstring>>& adds, bool remove) {
+    std::error_code ec;
+    const fs::path tables   = mount / "media" / "Stripped" / "StringTables";
+    const fs::path override = mount / "mediaoverride" / "Stripped" / "StringTables";
+    int done                = 0;
+    for (const auto& e : fs::directory_iterator(tables, ec)) {
+        if (!e.is_regular_file(ec) || !ieq(e.path().extension().string(), ".zip")) continue;
+        const auto target = override / e.path().stem() / fs::path{std::string{file}};
+        if (remove) {
+            if (fs::remove(target, ec)) ++done;
+            continue;
+        }
+        const auto orig = unzip_file(e.path(), file);
+        if (orig.empty()) continue;
+        const auto data = add_hashed(orig, adds);
         if (data.empty()) continue;
         fs::create_directories(target.parent_path(), ec);
         const auto tmp = target.wstring() + L".tmp";

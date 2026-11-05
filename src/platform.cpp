@@ -284,6 +284,10 @@ void apply_all() {
             if (auto it = m->repl.find(table); it != m->repl.end())
                 for (const auto& [f, t] : it->second) texts[f] = t;
         }
+        std::map<uint32_t, std::wstring> hashed;   // API 10: strings of hashed tables (later mods win on the same key)
+        for (const auto& m : g_mods)
+            if (auto it = m->add.find(table); it != m->add.end())
+                for (const auto& [k, v] : it->second) hashed[k] = v;
         const bool is_main = table == "main.str";
         HANDLE mu          = nullptr;
         bool notices       = false;
@@ -294,9 +298,10 @@ void apply_all() {
             if (mu) WaitForSingleObject(mu, 10000);
             notices = kGameFeatures && any_notices(g_azimuth); // the title-screen key is FH2's
         }
-        const bool remove = keys.empty() && texts.empty() && !notices;
+        const bool remove = keys.empty() && texts.empty() && hashed.empty() && !notices;
         const auto name   = g_table_names.count(table) ? g_table_names[table] : table;
-        const int n       = override_string_table(
+        const std::vector<std::pair<uint32_t, std::wstring>> hadds(hashed.begin(), hashed.end());
+        const int n       = !hashed.empty() ? override_hashed_table(g_game, name, hadds) : override_string_table(
             g_game, name,
             [&](uint16_t key, const std::wstring& t) {
                 std::wstring s = t;
@@ -512,6 +517,13 @@ void api_set_string(FH3Mod* m, const char* table, uint16_t key, const wchar_t* t
     touch(table);
 }
 
+void api_add_string_key(FH3Mod* m, const char* table, uint32_t key, const wchar_t* text) {
+    if (!m || !table) return;
+    std::scoped_lock lk{g_mu};
+    m->add[lower(table)][key] = text ? text : L"";
+    touch(table);
+}
+
 void api_replace_string(FH3Mod* m, const char* table, const wchar_t* from, const wchar_t* to) {
     if (!m || !table || !from) return;
     std::scoped_lock lk{g_mu};
@@ -525,12 +537,15 @@ void api_clear_strings(FH3Mod* m, const char* table) {
     if (table) {
         m->set.erase(lower(table));
         m->repl.erase(lower(table));
+        m->add.erase(lower(table));
         touch(table);
     } else {
         for (const auto& [t, _] : m->set) g_dirty.insert(t);
         for (const auto& [t, _] : m->repl) g_dirty.insert(t);
+        for (const auto& [t, _] : m->add) g_dirty.insert(t);
         m->set.clear();
         m->repl.clear();
+        m->add.clear();
     }
 }
 
@@ -1309,6 +1324,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
                 g_api.add_dump_memory   = add_dump_memory;
                 g_api.add_hotkey        = hotkey_add;
                 g_api.add_command       = command_add;
+                g_api.add_string_key    = api_add_string_key;
                 return load_mods(nullptr);
             },
             nullptr, 0, nullptr))
