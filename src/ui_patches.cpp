@@ -433,8 +433,8 @@ std::string main_strings(std::string str, std::string& report) {
 }
 
 // The placeholder page, used for three things, told apart by its text (the sticky PlaceholderTextSceneText, set by
-// the state flow): FH3MP_MODS is the Mods page, FH3MP_SAVING the Exit to Desktop saving screen (the game's own
-// "SAVING... PLEASE WAIT" texts over a blur, the wait spinner bottom right, no button prompts), anything else is
+// the state flow): FH3MP_MODS is the Mods page, FH3MP_SAVING the Exit to Desktop saving screen (laid out like the game's own wait
+// popup (A_WaitMessageBox: the "!" title banner and the grey band with the text and the spinner over a blurred screen)), anything else is
 // shown as it is. The Mods page's rows are written in by write_mods_page() once the mods have loaded.
 std::string g_mods_rows = R"(<local:FZTextBlock Style="{StaticResource A_Style_FZTextBlock_PopupText}" Text="Loading mods..." />)";
 std::string g_mods_header;
@@ -482,20 +482,27 @@ std::string placeholder_xaml() {
                                Text="{Binding Text}" VerticalAlignment="Center" HorizontalAlignment="Center" />
         </Grid>
         <Grid>)" + shown_for("FH3MP_SAVING", true) + R"(
-            <local:FZMaterial Style="{StaticResource A_Style_PauseMenuBlur}" />
-            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                <local:FZTextBlock Style="{StaticResource A_Style_FZTextBlock_AnthemA}"
-                                   Color="White" FontSize="80" HorizontalAlignment="Center"
-                                   Text="{local:Loc Main.IDS_Saving_Title}" />
-                <local:FZTextBlock Style="{StaticResource A_Style_FZTextBlock_PopupText}"
-                                   HorizontalAlignment="Center" Margin="0,20,0,0"
-                                   Text="{local:Loc Main.IDS_Saving_Desc_PC}" />
+            <local:FZMaterialGlassCapture />
+            <local:FZMaterial Color="{StaticResource A_Color_ClearGlass}"
+                              Preset="{DynamicResource A_FZMaterialPresetGlass_ScreenBlurMedium}" />
+            <StackPanel HorizontalAlignment="Stretch" VerticalAlignment="Center" Focusable="False">
+                <Decorator Style="{StaticResource A_Style_FrameworkElement_LayoutRoot}" Height="Auto">
+                    <ContentControl Content="{local:Loc Main.IDS_Saving_Title}"
+                                    Style="{StaticResource A_Style_ContentControl_PopupTitleBlock}"
+                                    local:BindingProxy.A="/ForzaUI;component/Textures/Anthem/Icons/Titles/PopupMessageBox.png" />
+                </Decorator>
+                <local:FZMaterial Style="{StaticResource A_Style_FZMaterial_PopupBacking}">
+                    <Decorator Style="{StaticResource A_Style_FrameworkElement_LayoutRoot}" Height="Auto">
+                        <StackPanel Orientation="Vertical">
+                            <local:FZTextBlock Text="{local:Loc Main.IDS_Saving_Desc_PC}"
+                                               Style="{StaticResource A_Style_FZTextBlock_PopupText}" />
+                            <ProgressBar IsIndeterminate="True"
+                                         Style="{StaticResource A_Style_ProgressBar_WaitSpinner}"
+                                         Height="56" Margin="0,0,0,20" />
+                        </StackPanel>
+                    </Decorator>
+                </local:FZMaterial>
             </StackPanel>
-            <ProgressBar IsIndeterminate="True"
-                         Style="{StaticResource A_Style_ProgressBar_WaitSpinner}"
-                         Width="56" Height="56"
-                         HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                         Margin="0,0,90,70" />
         </Grid>
         <Grid>)" + shown_for("FH3MP_MODS", true) + R"(
             <local:FZMaterial Style="{StaticResource A_Style_PauseMenuBlur}" />
