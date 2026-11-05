@@ -96,6 +96,11 @@ std::filesystem::path home_title_folder();
 std::filesystem::path azimuth_dir();
 std::filesystem::path game_mount(); // empty if not found
 
+// units.cpp: speed and power units chosen on their own (0 = the game's own, then the units).
+int units_get(int which);
+void units_set(int which, int v);
+void units_start();
+
 // files.cpp: file overrides in Extra Options' mediaoverride folder.
 int set_file(FH3Mod* mod, const char* media_path, const void* data, std::size_t size);
 void clear_file(FH3Mod* mod, const char* media_path);

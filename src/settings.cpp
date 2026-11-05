@@ -1670,6 +1670,55 @@ bool write_custom_page(const char* file, const std::string& resources, const std
     return set_file(&g_owner_mod, (std::string("UI/Scenes/Anthem/") + file).c_str(), page.data(), page.size()) != 0;
 }
 
+
+// ---- Settings > HUD and Gameplay: speed and power units of their own -------------------------------
+int g_unit_row[2] = {-1, -1};
+
+void units_changed(void* user, const char*, int v) { units_set(static_cast<int>(reinterpret_cast<std::uintptr_t>(user)), v); }
+
+void add_unit_rows() {
+    units_start();
+    static const char* kLabel[2] = {"Speed unit", "Power unit"};
+    static const char* kDesc[2]  = {"The unit speed is shown in, whatever Units is set to. Automatic follows Units.",
+                                    "The unit power is shown in, whatever Units is set to. Automatic follows Units."};
+    std::scoped_lock lk{g_mu};
+    for (int w = 0; w < 2; ++w) {
+        Row& r        = g_rows.emplace_back();
+        r.mod         = &g_hub_owner;
+        r.key         = w ? "PowerUnit" : "SpeedUnit";
+        r.label       = kLabel[w];
+        r.description = kDesc[w];
+        r.prop        = "FH3Mod_" + std::to_string(g_rows.size() - 1);
+        r.choices     = w ? std::vector<std::string>{"Automatic", "Horsepower (hp)", "Kilowatts (kW)"}
+                          : std::vector<std::string>{"Automatic", "km/h", "mph"};
+        const int v   = units_get(w);
+        r.slider = true;
+        r.fmin = 0; r.fmax = static_cast<float>(r.choices.size() - 1); r.fstep = 1; r.scale = 1; r.decimals = 0;
+        r.value = v; r.boot = v; r.fvalue = static_cast<float>(v); r.fboot = r.fvalue;
+        r.on_change = &units_changed;
+        r.user      = reinterpret_cast<void*>(static_cast<std::uintptr_t>(w));
+        g_unit_row[w] = static_cast<int>(g_rows.size() - 1);
+    }
+}
+
+// A_HUDOptions.xaml with the two rows after Units. It keeps its class, so Extra Options still patches it.
+bool write_units_page() {
+    std::string page = read_ui("Scenes/Anthem/A_HUDOptions.xaml");
+    const std::string anchor = "Tag=\"{StaticResource A_DataItem_Units}\"";
+    const std::size_t a = page.find(anchor);
+    const std::size_t e = a == std::string::npos ? a : page.find("/>", a);
+    const std::size_t rs = page.find("</ResourceDictionary>");
+    if (e == std::string::npos || rs == std::string::npos || rs > e || g_unit_row[0] < 0) {
+        slog("A_HUDOptions.xaml doesn't look as expected; no speed and power units");
+        return false;
+    }
+    std::string res;
+    const std::string rows = list_rows({{g_unit_row[0], "", ""}, {g_unit_row[1], "", ""}}, "FH3Mod_UnitRow_", "", res);
+    page.insert(e + 2, rows);
+    page.insert(rs, res);
+    return set_file(&g_owner_mod, "UI/Scenes/Anthem/A_HUDOptions.xaml", page.data(), page.size()) != 0;
+}
+
 // The Mods page (Settings > Mods, and the MODS tab's All settings): every mod's rows.
 bool write_mods_page() {
     std::vector<PageItem> items;
@@ -4681,6 +4730,7 @@ void settings_start(const FH3ModApi* api) {
         n = g_rows.size();
     }
     add_hub_rows();
+    add_unit_rows();
     g_written = true;
     if (game_mount().empty()) {
         slog("the game folder wasn't found; no Mods page");
@@ -4691,6 +4741,7 @@ void settings_start(const FH3ModApi* api) {
     g_hub_files = true;
     for (int p = kHubInstalled; p <= kHubAbout && g_hub_files; ++p)
         if (p != kHubGetMods) g_hub_files = write_hub_page(p);
+    if (!write_units_page()) remove_leftover_file("UI/Scenes/Anthem/A_HUDOptions.xaml");
     const bool mods_page = write_mods_page();
     if (!mods_page) remove_leftover_file("UI/Scenes/Anthem/A_ModOptions.xaml");
     slog(std::to_string(n) + " row(s) on the Mods page, " + std::to_string(g_entries.size()) + " mod(s) on Installed mods" +
