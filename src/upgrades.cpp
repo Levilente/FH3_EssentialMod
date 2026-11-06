@@ -17,6 +17,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 
 namespace fh3platform {
 namespace {
@@ -285,6 +286,67 @@ void repair_save(void* db, const char* z) {
     if (r == 0) g_repaired.store(true);
 }
 
+// ---- which of the player's cars is which model -----------------------------------------------------------------
+// The driven garage id is learned from the game's statements (stats saved, shop queries), which can come late: a
+// car chosen at an event's car select is built and driven a few seconds before its stats are saved. The car itself
+// knows its Data_Car id, so the platform keeps the player's garage (garage id -> CarId) and the time the game last
+// read each garage car, and upgrades_garage_for_car() answers "which of the player's cars is this?".
+std::mutex g_gar_mu;
+std::unordered_map<long, long> g_gar_car;         // garage id -> Data_Car id (CarId)
+std::unordered_map<long, uint64_t> g_gar_touch;   // garage id -> GetTickCount64 of the game's last statement on it
+std::atomic<uint64_t> g_gar_loaded{0};
+std::atomic<bool> g_gar_dirty{true};
+
+long car_model(long v) { return v >= 100000 ? v / 1000 : v; }   // Data_Car id 2154003 -> model 2154; 445 stays 445
+
+int gar_row(void* p, int n, char** v, char**) {
+    if (n >= 2 && v && v[0] && v[1]) static_cast<std::unordered_map<long, long>*>(p)->emplace(atol(v[0]), atol(v[1]));
+    return 0;
+}
+
+void refresh_garage_map(void* db) {
+    const uint64_t now = GetTickCount64();
+    if (!db || t_in_repair || !game() || (!g_gar_dirty.load() && now - g_gar_loaded.load() < 15000)) return;
+    std::unordered_map<long, long> m;
+    t_in_repair = true;
+    const int r = reinterpret_cast<ExecFn>(game() + 0x421D0)(db, "SELECT Id, CarId FROM Profile0_Career_Garage", reinterpret_cast<void*>(&gar_row), &m, nullptr);
+    t_in_repair = false;
+    g_gar_loaded.store(now);
+    if (r != 0) return;
+    g_gar_dirty.store(false);
+    size_t before = 0;
+    {
+        std::scoped_lock lk{g_gar_mu};
+        before = g_gar_car.size();
+        g_gar_car.swap(m);
+    }
+    if (before != g_gar_car.size()) plog("upgrades: the player's garage has " + std::to_string(g_gar_car.size()) + " cars");
+}
+
+void touch_garage(long gid, const char* z) {
+    if (gid <= 0 || gid >= 2000000000L) return;
+    {
+        std::scoped_lock lk{g_gar_mu};
+        g_gar_touch[gid] = GetTickCount64();
+    }
+    static std::atomic<long> last{0};
+    static std::atomic<int> lines{0};
+    if (last.exchange(gid) != gid && lines.fetch_add(1) < 120) plog("upgrades: the game reads garage car " + std::to_string(gid) + " (" + std::string(z, strnlen(z, 70)) + ")");
+}
+
+// The game's statements on the player's garage: note the garage id they name; refresh the map now and then.
+void watch_garage(void* db, const char* z, size_t len) {
+    if (len < 20 || !strstr(z, "Profile0_")) return;
+    const bool garage_table = strstr(z, "Profile0_Career_Garage") != nullptr;
+    if (garage_table && (z[0] == 'I' || z[0] == 'D' || z[0] == 'R')) {   // INSERT / DELETE / REPLACE: a car bought or sold
+        g_gar_dirty.store(true);
+        return;
+    }
+    long v = 0;
+    if (value_of(z, "GarageId", &v) || value_of(z, "GarageID", &v) || (garage_table && value_of(z, " WHERE Id", &v))) touch_garage(v, z);
+    if (garage_table) refresh_garage_map(db);
+}
+
 // The game's statements for a part above enum 42 name the table entry every such enum shares (MotorParts).
 bool rewrite(const char* z, size_t len, std::string& out) {
     if (len < 30) return false;
@@ -386,6 +448,7 @@ int detour_prepare(void* db, const char* z, int n, unsigned fl, void* old, void*
     if (!t_in_repair && !g_repaired.load()) repair_save(db, z);
     if (z && readable(z, 64) && g_count.load() > 0) {
         const size_t len = n < 0 ? strlen(z) : static_cast<size_t>(n);
+        if (!t_in_repair) watch_garage(db, z, len);
         if (len > 24 && z[0] == 'U' && strncmp(z, "UPDATE Profile0_Career_Garage SET TopSpeed", 42) == 0) {
             const char* w = strstr(z, " WHERE Id=");   // the driven car's stats are saved: that is its garage id
             if (w) activate(static_cast<unsigned>(atol(w + 10)), "car stats saved");
@@ -947,7 +1010,45 @@ int32_t upgrades_car_model(int32_t garage) {
         const long o = car_locked(g_up[i], garage).ord;
         if (o > 0) return static_cast<int32_t>(o);
     }
-    return 0;
+    std::scoped_lock lk2{g_gar_mu};
+    const auto it = g_gar_car.find(garage);
+    return it != g_gar_car.end() ? static_cast<int32_t>(car_model(it->second)) : 0;
+}
+
+int32_t upgrades_garage_for_car(int32_t car_id, uint32_t flags) {
+    if (car_id <= 0) return 0;
+    const long want   = car_model(car_id);
+    const unsigned act = g_active.load();
+    bool known = false, act_in = false;
+    long best = 0, cands = 0;
+    uint64_t best_t = 0;
+    {
+        std::scoped_lock lk{g_gar_mu};
+        known = !g_gar_car.empty();
+        for (const auto& [g, c] : g_gar_car) {
+            if (car_model(c) != want) continue;
+            ++cands;
+            if (static_cast<unsigned>(g) == act) act_in = true;
+            const auto t = g_gar_touch.find(g);
+            const uint64_t tt = t != g_gar_touch.end() ? t->second : 0;
+            if (!best || tt > best_t) { best = g; best_t = tt; }
+        }
+    }
+    if (!known) {   // the garage isn't read yet: the model recorded for the driven car decides, as before API 14
+        const int32_t m = act ? upgrades_car_model(static_cast<int32_t>(act)) : 0;
+        return act && (m <= 0 || car_model(m) == want) ? static_cast<int32_t>(act) : 0;
+    }
+    if (act_in) return static_cast<int32_t>(act);
+    if (!cands) return 0;   // none of the player's cars is that model: a loaner, an AI car
+    const char* why = nullptr;
+    if (best_t && GetTickCount64() - best_t < 60000) why = "the game read it just before";
+    else if (flags & FH3MOD_CAR_IS_PLAYERS) why = "the player's car is that model";
+    if (!why) return 0;
+    if (flags & FH3MOD_CAR_MAKE_DRIVEN) {
+        const std::string r = std::string("model ") + std::to_string(want) + ", " + why;
+        activate(static_cast<unsigned>(best), r.c_str());
+    }
+    return static_cast<int32_t>(best);
 }
 
 void upgrades_import(int handle, int32_t garage, int32_t ordinal, int stage, uint32_t owned_mask_in) {

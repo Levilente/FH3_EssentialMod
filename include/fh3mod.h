@@ -33,7 +33,7 @@
 extern "C" {
 #endif
 
-#define FH3MOD_API_VERSION 13
+#define FH3MOD_API_VERSION 14
 
 #ifdef __cplusplus
 #define FH3MOD_EXPORT extern "C" __declspec(dllexport)
@@ -577,7 +577,20 @@ typedef struct FH3ModApi {
        game's own tuning sliders. The row is written into the page when the tuning menu is built, so add rows from
        fh3mod_init. See FH3TuningRow. Returns 1 if added, 0 if not (the log says why). Up to 8 rows from every mod. */
     int (*add_tuning_row)(FH3Mod* mod, const struct FH3TuningRow* row);
+    /* ==== API version 14: check api_version >= 14 ======================== */
+
+    /* Which of the player's cars is a car with this Data_Car id (the number in the car's spec, model * 1000 + variant,
+       or the model itself)? Returns its garage id, or 0 when it isn't one of the player's cars (a mission loaner, an
+       AI car). The driven car's garage id wins when it is that model; otherwise the player's car of that model the
+       game read last (within a minute: an event's car select reads the chosen car), or, with FH3MOD_CAR_IS_PLAYERS,
+       the player's car of that model even without such a read. FH3MOD_CAR_MAKE_DRIVEN makes the answer the driven
+       car (upgrade_active_garage, the stage callbacks run). Use it when the game builds or drives a car: the driven
+       garage id the platform learns from the game's statements can lag behind a car switch by several seconds. */
+    int32_t (*upgrade_garage_for_car)(int32_t car_id, uint32_t flags);
 } FH3ModApi;
+
+#define FH3MOD_CAR_MAKE_DRIVEN 1u   /* upgrade_garage_for_car: make the car found the driven car */
+#define FH3MOD_CAR_IS_PLAYERS  2u   /* upgrade_garage_for_car: the caller knows this is the car the player drives */
 
 /* One slider row on the tuning menu (API 13). All callbacks run on the game's UI thread: keep them short, don't call
    into the game from them. */

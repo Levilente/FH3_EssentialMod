@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Which of the player's cars is this? (API 14)**: `upgrade_garage_for_car(car_id, flags)` answers from the car's model and the player's garage (read from the save), and can make that car the driven one. The driven garage id the platform learned from the game's statements lagged behind a car switch at an event's car select by several seconds, so a car chosen there ran without its custom upgrades (nitro, wheel spacers) until the game saved it as driven.
 - **Tuning rows (API 13)**: `add_tuning_row` adds a slider to the car's Tuning > Springs page (bound to custom AVUI properties, optional per-car `visible` callback).
 
 ## 1.0.0
