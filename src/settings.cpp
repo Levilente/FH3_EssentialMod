@@ -1846,7 +1846,7 @@ std::string tune_row_xaml(std::size_t i, const TuneRow& r) {
     auto fmt = [&](float f) { char b[32]; std::snprintf(b, sizeof b, "%.*f", r.decimals, static_cast<double>(f)); return std::string(b); };
     const std::string vis = "Visibility=\"{Binding Tuning.FH3Mod_TuneVis_" + n + ", Converter={StaticResource FH3Mod_TuneShow}}\"";
     std::string x;
-    x += "                                <ListBoxItem Style=\"{StaticResource A_Style_ListBoxItem_List_Tuning}\" Focusable=\"False\"\r\n"
+    x += "                                <ListBoxItem Style=\"{StaticResource A_Style_ListBoxItem_List_Tuning}\" Focusable=\"False\" local:BindingProxy.B=\"{StaticResource A_Style_FZMaterial_AcrylicPanel_BodyPanel}\"\r\n"
          "                                             " + vis + ">\r\n"
          "                                <ItemsControl Style=\"{StaticResource A_Style_ItemsControl_1x3_TuningSpaced_Header}\">\r\n"
          "                                    <local:FZTextBlock Style=\"{StaticResource A_Style_FZTextBlock_Tune_ItemTitle}\" Text=\"" + xml_escape(head) + "\" HorizontalAlignment=\"Left\" Grid.Column=\"0\" />\r\n"
@@ -1869,7 +1869,7 @@ std::string tune_row_xaml(std::size_t i, const TuneRow& r) {
          "\" Value=\"{Binding Value, ElementName=FH3Mod_Tune_Value_" + n + ", Mode=TwoWay}\" Style=\"{StaticResource A_Style_Slider_Tuning_Adjust_ThumbOnly}\"/>\r\n"
          "                                    </Grid>\r\n"
          "                                    <local:FZTextBlock Style=\"{StaticResource A_Style_FZTextBlock_Tune_ItemValue}\"\r\n"
-         "                                                        Text=\"{Binding Tuning.FH3Mod_Tune_" + n + ", Converter={StaticResource FH3Mod_TuneNum_" + n + "}}\"\r\n"
+         "                                                        Text=\"{Binding Value, ElementName=FH3Mod_Tune_Value_" + n + ", Converter={StaticResource FH3Mod_TuneNum_" + n + "}}\"\r\n"
          "                                                        HorizontalAlignment=\"Right\"\r\n"
          "                                                        Grid.Column=\"2\" />\r\n"
          "                                </ItemsControl>\r\n"
