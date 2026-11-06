@@ -36,6 +36,7 @@ TorqueFn g_orig = nullptr;
 std::atomic<int> g_enabled{0};
 std::atomic<int> g_logged{0};
 std::atomic<uint64_t> g_calls{0};
+std::atomic<uint64_t> g_last_torque_ms{0};   // the engine step last ran for some car (driving, traffic ...)
 std::atomic<uint64_t> g_pad_tick{0};
 std::atomic<float> g_rt{0.0f};
 
@@ -159,11 +160,13 @@ void exp_step(bool shop_in_use) {
     }
 }
 
+bool not_driving() { return GetTickCount64() - g_last_torque_ms.load() > 1500; }   // no engine step anywhere: the garage, a menu
+
 uint64_t detour_rel(void* self) {
     char* car = static_cast<char*>(self) - kCarSecondary;
     const uint64_t shop = upgrades_shop_tick();
-    if (!g_exp_on && g_n_gar.load() > 0 && (!shop || GetTickCount64() - shop > 10000)) g_n_gar.store(0);   // the garage cars are gone: no stale pointers
-    if (g_probe.load() && shop && GetTickCount64() - shop < 2500 && g_n_gar.load() < 3) {
+    if (!g_exp_on && g_n_gar.load() > 0 && !not_driving()) g_n_gar.store(0);   // the garage cars are gone: no stale pointers
+    if (g_probe.load() && g_last_torque_ms.load() && not_driving() && g_n_gar.load() < 3) {
         bool known = false;
         for (int k = 0; k < g_n_gar.load(); ++k) known |= g_gar_car[k] == car;
         if (!known && readable(car, kSnap)) {
@@ -173,12 +176,12 @@ uint64_t detour_rel(void* self) {
             g_n_gar.store(k + 1);
             if (k + 1 > g_n_snap.load()) g_n_snap.store(k + 1);
             char b[120];
-            snprintf(b, sizeof b, "rev probe: garage car %d is %p (seen ticking while the shop is in use)", k, static_cast<void*>(car));
+            snprintf(b, sizeof b, "rev probe: garage car %d is %p (ticking while nothing is driven)", k, static_cast<void*>(car));
             plog(b);
         }
     }
     if (g_have_drv.load() && g_n_snap.load() > 0) log_diff();
-    if (g_have_drv.load() && g_n_gar.load() > 0) exp_step(shop && GetTickCount64() - shop < 8000);
+    if (g_have_drv.load() && g_n_gar.load() > 0) exp_step(not_driving());
     if (shop && shop != g_last_shop_logged.load() && GetTickCount64() - shop < 100 && g_n_gar.load() == 0 && g_have_drv.load()) {
         g_last_shop_logged.store(shop);
         static int n = 0;
@@ -189,6 +192,7 @@ uint64_t detour_rel(void* self) {
 
 bool detour_torque(void* self, float rpm, float throttle, void* r8, void* r9, uint64_t a5, uint64_t a6, uint64_t a7, uint64_t a8) {
     g_calls.fetch_add(1);
+    if (!is_garage_car(self)) g_last_torque_ms.store(GetTickCount64());
     if (g_exp_on && is_garage_car(self)) {
         g_gcalls.fetch_add(1);
         if (rpm > g_gpeak.load()) g_gpeak = rpm;
@@ -197,7 +201,7 @@ bool detour_torque(void* self, float rpm, float throttle, void* r8, void* r9, ui
     }
     if (g_probe.load() && !g_have_drv.load()) {
         const uint64_t shop = upgrades_shop_tick();
-        if (throttle > 0.8f && trigger() > 0.8f && (!shop || GetTickCount64() - shop > 20000) && readable(self, kSnap)) {
+        if (throttle > 0.8f && trigger() > 0.8f && readable(self, kSnap)) {
             memcpy(g_drv, self, kSnap);
             g_drv_car.store(self);
             g_have_drv.store(true);
