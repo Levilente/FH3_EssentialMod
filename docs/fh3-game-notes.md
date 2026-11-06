@@ -310,3 +310,9 @@ the shop's car on every preview, other cars), so a mod must check the model.
   enough Credits. Would you like to purchase using Tokens?"); otherwise it stores `edx` at `this+0x43C` and goes on to the "install?" prompt. The one
   caller, `0x16C699A`, takes the cost from the basket object (`+0x500`). The game sums only its own parts; the platform hooks the function and adds
   the price of the bridge stages waiting in the basket to `edx`.
+
+## Revving in the garage (found 6 Nov, platform 1.0.0)
+
+- The game has a rev feature of its own on the Car Meet car details page (`Scenes/Anthem/A_CarMeetCarDetails.xaml` in `UI.zip`): a `ControllerButtonControl` with `Button="RTrigger"`, `Description="{local:Loc HelpButtons.IDS_Gas}"` and the page commands `StartRevEngine` / `StopRevEngine` (mouse down / up / leave). No upgrade or garage scene has it. The command names are registered as type nodes (`StartRevEngine` at game+0x2EFBE58, getter game+0x1426A80, `StopRevEngine` getter game+0x1426F80); nothing else in the code refers to them directly, the page looks them up by name.
+- The garage / upgrade shop car runs no engine step: the engine torque function (game+0x1D278C0: this, xmm1 revs, xmm2 throttle, r9 out) is not called at all while the shop is open (counted with a hook), so writing a throttle into it does nothing. A diff of the simulated car's fields with the right trigger held and released found no throttle input either (only suspension noise).
+- `FreeRevOverrides` (per car ordinal, read when the car's data loads), `HumanRevScript` / `AIRevScript` (`TargetRevFraction`) are car data for the physics car's rev blips and free rev.
