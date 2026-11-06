@@ -168,6 +168,7 @@ void clear_previews() {
 void activate(unsigned gid, const char* why = "") {
     if (gid == 0 || gid >= 2000000000u || gid == g_active.load()) return;
     clear_previews();
+    for (int i = 0; i < g_count.load(); ++i) g_up[i]->pend.store(false);   // a basket belongs to the car it was filled for
     plog("upgrades: driven car is garage " + std::to_string(gid) + " (was " + std::to_string(g_active.load()) + ", " + why + ")");
     g_active.store(gid);
     WritePrivateProfileStringW(L"general", L"LastGarage", wnum(gid).c_str(), ini_path().c_str());
@@ -908,6 +909,12 @@ int upgrades_stage(int handle, int32_t garage) {
     // anything later than that gets the fitted stage again.
     if (const int pv = u->preview.load(); pv >= 0 && pv < u->count() && u->preview_gid.load() == gid && GetTickCount64() <= u->preview_until.load())
         return pv;
+    // A stage in the basket (chosen, not installed yet) stays on the shop's car like the game's own basket parts, until
+    // the setup is installed (commit) or abandoned, or another car is driven.
+    if (u->pend.load() && gid == static_cast<long>(g_active.load())) {
+        int st = 0;
+        if (by_part(u->pend_id.load(), &st) == u) return st;
+    }
     return get_stage(u, gid, 0);
 }
 uint32_t upgrades_active_garage() { return g_active.load(); }
