@@ -74,6 +74,8 @@ unsigned char g_drv[kSnap], g_gar[3][kSnap];
 void* g_gar_car[3] = {nullptr, nullptr, nullptr};
 std::atomic<bool> g_have_drv{false}, g_diffed{false};
 std::atomic<int> g_n_gar{0};
+std::atomic<int> g_n_snap{0};   // snapshots taken (never reset)
+std::atomic<uint64_t> g_last_shop_logged{0};
 std::atomic<void*> g_drv_car{nullptr};
 std::atomic<int> g_probe{1};
 using RelFn = uint64_t (*)(void*);
@@ -81,7 +83,7 @@ RelFn g_orig_rel = nullptr;
 
 void log_diff() {
     if (g_diffed.exchange(true)) return;
-    for (int k = 0; k < g_n_gar.load(); ++k) {
+    for (int k = 0; k < g_n_snap.load(); ++k) {
         std::string out = "rev probe: garage car " + std::to_string(k) + " vs driven car, small dwords that differ (offset garage->driven):";
         int n = 0;
         for (int o = 0; o + 4 <= kSnap && n < 160; o += 4) {
@@ -164,19 +166,23 @@ uint64_t detour_rel(void* self) {
     if (g_probe.load() && shop && GetTickCount64() - shop < 2500 && g_n_gar.load() < 3) {
         bool known = false;
         for (int k = 0; k < g_n_gar.load(); ++k) known |= g_gar_car[k] == car;
-        if (!known && car != g_drv_car.load() && readable(car, kSnap)) {
+        if (!known && readable(car, kSnap)) {
             const int k = g_n_gar.load();
             memcpy(g_gar[k], car, kSnap);
             g_gar_car[k] = car;
             g_n_gar.store(k + 1);
+            if (k + 1 > g_n_snap.load()) g_n_snap.store(k + 1);
             char b[120];
             snprintf(b, sizeof b, "rev probe: garage car %d is %p (seen ticking while the shop is in use)", k, static_cast<void*>(car));
             plog(b);
         }
     }
-    if (g_have_drv.load() && g_n_gar.load() > 0) {
-        log_diff();
-        exp_step(shop && GetTickCount64() - shop < 8000);
+    if (g_have_drv.load() && g_n_snap.load() > 0) log_diff();
+    if (g_have_drv.load() && g_n_gar.load() > 0) exp_step(shop && GetTickCount64() - shop < 8000);
+    if (shop && shop != g_last_shop_logged.load() && GetTickCount64() - shop < 100 && g_n_gar.load() == 0 && g_have_drv.load()) {
+        g_last_shop_logged.store(shop);
+        static int n = 0;
+        if (n++ < 6) plog("rev probe: the shop touched the car, waiting for a garage car tick");
     }
     return g_orig_rel(self);
 }
