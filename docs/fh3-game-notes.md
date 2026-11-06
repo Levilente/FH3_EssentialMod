@@ -302,3 +302,11 @@ the shop's car on every preview, other cars), so a mod must check the model.
   to take the handbrake away in a test, so it is left alone.
 - Steering geometry (`SteerRotAxisTireOffsetX` from `List_SpringDamperPhysics`, spec `+0xA0`, stored at `0x19F5E16`) is not changed by
   the spacers; the brake and handbrake problems seen with them were the part-set overflow above, not the geometry.
+
+## The shop's credit check (found 6 Nov, platform 1.0.6)
+
+- `0x16CA9F0` (`rcx` shop object, `edx` total cost, `r8d` Credits, `r9d` another amount, stack: two more): `cmp edx, r8d; ja` goes to the
+  "not enough" popup builder `0x16E94D0` (messages `IDS_NotEnoughCredits` / `IDS_NotEnoughCreditsOrTokens`, text in UpgradeCar.str: "You do not have
+  enough Credits. Would you like to purchase using Tokens?"); otherwise it stores `edx` at `this+0x43C` and goes on to the "install?" prompt. The one
+  caller, `0x16C699A`, takes the cost from the basket object (`+0x500`). The game sums only its own parts; the platform hooks the function and adds
+  the price of the bridge stages waiting in the basket to `edx`.

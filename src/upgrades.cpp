@@ -418,7 +418,7 @@ typedef void* (*Fn12)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t
 #define ARGS12 uint64_t a, uint64_t b, uint64_t c, uint64_t d, uint64_t e, uint64_t f, uint64_t g, uint64_t h, uint64_t i, uint64_t j, uint64_t k, uint64_t l
 #define PASS12 a, b, c, d, e, f, g, h, i, j, k, l
 
-Fn12 g_orig_select = nullptr, g_orig_add = nullptr, g_orig_commit = nullptr, g_orig_abandon = nullptr;
+Fn12 g_orig_select = nullptr, g_orig_add = nullptr, g_orig_commit = nullptr, g_orig_abandon = nullptr, g_orig_afford = nullptr;
 typedef int (*MemcmpFn)(const void*, const void*, size_t);
 typedef int (*DiffFn)(const void*, const void*);
 typedef void* (*QueryBuildA)(void*, void*, int);
@@ -679,6 +679,29 @@ void* detour_commit(ARGS12) {
     return res;
 }
 
+// The shop's affordability check (0x16CA9F0: this, edx = total cost, r8d = Credits; cost above Credits opens the game's
+// "You do not have enough Credits" message, otherwise it goes on to the "install?" prompt with that cost). The game
+// sums the basket itself and knows nothing of our stages, so their price is added here: one check, one message.
+void* detour_afford(ARGS12) {
+    long extra = 0;
+    const int n = g_count.load();
+    const long gid = g_active.load();
+    for (int q = 0; q < n; ++q) {
+        Upgrade* u = g_up[q];
+        if (!u->pend.load()) continue;
+        int st = 0;
+        const long pid = u->pend_id.load();
+        if (!by_part(pid, &st) || by_part(pid, nullptr) != u || st <= 0 || is_owned(u, gid, st)) continue;
+        extra += u->stages[st].price;
+    }
+    if (extra > 0) {
+        static int logged = 0;
+        if (logged++ < 6) plog("upgrades: the shop's cost check: " + std::to_string(static_cast<uint32_t>(b)) + " + " + std::to_string(extra) + " for the upgrade(s) of mods");
+        b = static_cast<uint32_t>(static_cast<uint32_t>(b) + static_cast<uint32_t>(extra));
+    }
+    return g_orig_afford(PASS12);
+}
+
 void* detour_abandon(ARGS12) {
     const int n = g_count.load();
     for (int q = 0; q < n; ++q) g_up[q]->pend.store(false);
@@ -704,6 +727,7 @@ void install_hooks() {
         {0x16FAEF0, reinterpret_cast<void*>(detour_add), "upgrades: part add step", reinterpret_cast<void**>(&g_orig_add)},
         {0x19CDBB0, reinterpret_cast<void*>(detour_diff), "upgrades: parts differ?", reinterpret_cast<void**>(&g_orig_diff)},
         {0x4081A0, reinterpret_cast<void*>(detour_commit), "upgrades: shop commit", reinterpret_cast<void**>(&g_orig_commit)},
+        {0x16CA9F0, reinterpret_cast<void*>(detour_afford), "upgrades: shop cost check", reinterpret_cast<void**>(&g_orig_afford)},
         {0x16C8C70, reinterpret_cast<void*>(detour_abandon), "upgrades: abandon setup", reinterpret_cast<void**>(&g_orig_abandon)},
         {0x16DC050, reinterpret_cast<void*>(detour_select), "upgrades: A handler", reinterpret_cast<void**>(&g_orig_select)},
         {0x1802D82, reinterpret_cast<void*>(detour_memcmp), "upgrades: memcmp thunk", reinterpret_cast<void**>(&g_orig_memcmp)},

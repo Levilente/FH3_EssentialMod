@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.6
+
+- **Upgrade bridge: the game's own credit check now counts bridge upgrades.** The shop's affordability check (`0x16CA9F0`, total cost against Credits) summed only the game's parts, so a mod upgrade you couldn't pay for slipped through. The platform adds the price of the bridge stages in the basket to that total, so the game itself says "You do not have enough Credits" and shows the right total in the "install?" prompt: one check for everything in the basket. The message box from 1.0.5 stays only as a fallback.
+
 ## 1.0.5
 
 - **Upgrade bridge: not enough Credits is said.** The game's own affordability check does not count the price of a bridge upgrade, so installing one you couldn't pay for did nothing at all, silently. The platform now shows a message box ("INSUFFICIENT CR!", the price and your Credits) after the commit and leaves the upgrade uninstalled and unpaid. Other parts in the same basket are handled by the game as before.
