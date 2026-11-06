@@ -1039,6 +1039,15 @@ int upgrades_stage(int handle, int32_t garage) {
     }
     return get_stage(u, gid, 0);
 }
+// The stage the shop's list is showing on the car while the cursor stays on it (-1: none). No time limit, unlike upgrades_stage; a stage in the basket
+// doesn't count (the cursor has left it), the preview ends with the shop's setup puts as before.
+int upgrades_preview_stage(int handle) {
+    Upgrade* u = handle_upgrade(handle);
+    if (!u || g_foreign.load()) return -1;
+    const int pv = u->preview.load();
+    if (pv < 0 || pv >= u->count() || u->preview_gid.load() != static_cast<long>(g_active.load()) || u->pend.load()) return -1;
+    return pv;
+}
 uint32_t upgrades_active_garage() { return g_foreign.load() ? 0u : g_active.load(); }
 
 int32_t upgrades_car_model(int32_t garage) {

@@ -33,7 +33,7 @@
 extern "C" {
 #endif
 
-#define FH3MOD_API_VERSION 14
+#define FH3MOD_API_VERSION 15
 
 #ifdef __cplusplus
 #define FH3MOD_EXPORT extern "C" __declspec(dllexport)
@@ -596,6 +596,14 @@ typedef struct FH3ModApi {
        that model (see upgrade_garage_for_car; it becomes the driven car), 0 when it isn't one of the player's cars.
        The call for a mod that changes a car while the game builds it (wheel spacers: the car's track). */
     int (*upgrade_stage_for_car)(FH3Mod* mod, int handle, int32_t car_id);
+    /* ==== API version 15: check api_version >= 15 ======================== */
+
+    /* The stage of your upgrade the garage's upgrade list is showing on the car right now (the cursor is on it), or -1
+       when none is: the cursor is on something else or has left the list, the stage was put in the basket or the setup
+       was installed or abandoned. Unlike upgrade_stage's preview, which answers for 300 ms after each cursor move for the
+       rebuild the game starts, this one stays while the cursor stays. For a mod that shows something on the car for as
+       long as the player looks at the stage (the Airride lowers the car 3 cm). Any thread. */
+    int (*upgrade_preview_stage)(FH3Mod* mod, int handle);
 } FH3ModApi;
 
 #define FH3MOD_CAR_MAKE_DRIVEN 1u   /* upgrade_garage_for_car: make the car found the driven car */
