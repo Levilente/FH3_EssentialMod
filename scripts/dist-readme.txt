@@ -1,7 +1,7 @@
 FH3 Mod Platform
 ================
 
-The shared base for Forza Horizon 3 (Azimuth) mods. Version 1.0.0, mod API 11. It's one DLL under
+The shared base for Forza Horizon 3 (Azimuth) mods. Version 1.0.0, mod API 12. It's one DLL under
 two names: d3dcompiler_47.dll, which Azimuth up to 1.0.1 loads, and
 DWrite.dll, which Azimuth 1.0.1 and later load (1.0.3 loads only this
 one). It loads every mod in the fh3-mods folder next to azimuth.exe and

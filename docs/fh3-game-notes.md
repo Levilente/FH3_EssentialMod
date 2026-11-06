@@ -266,7 +266,7 @@ thunk (`0x1802D82`), and patches the basket check (`0x16FB341`). Purchases call 
 `0x36BDA0` and the garage-id getter `0x37AA10`. The game forgets a part when another one of the same type is fitted, so the owned stages are written
 back to `Profile0_Career_PurchasedParts` whenever the shop asks about them.
 
-Found 6 Nov (platform 1.0.1 and 1.0.2):
+Found 6 Nov (platform 1.0.0):
 
 - **Part set and tuning.** The car's part set is `+8 + 4*enum` for enums 0 to 42 (enum 43, the wheel style, is at `+4`), 0xB4 bytes in all, and the
   tuning setup follows it directly (the shop's 0x16C-byte setup compare covers both). The part setter `0x36B7A0` (`ecx` enum, `edx` part id, `r8d`, `r9d`,
@@ -303,7 +303,7 @@ the shop's car on every preview, other cars), so a mod must check the model.
 - Steering geometry (`SteerRotAxisTireOffsetX` from `List_SpringDamperPhysics`, spec `+0xA0`, stored at `0x19F5E16`) is not changed by
   the spacers; the brake and handbrake problems seen with them were the part-set overflow above, not the geometry.
 
-## The shop's credit check (found 6 Nov, platform 1.0.6)
+## The shop's credit check (found 6 Nov, platform 1.0.0)
 
 - `0x16CA9F0` (`rcx` shop object, `edx` total cost, `r8d` Credits, `r9d` another amount, stack: two more): `cmp edx, r8d; ja` goes to the
   "not enough" popup builder `0x16E94D0` (messages `IDS_NotEnoughCredits` / `IDS_NotEnoughCreditsOrTokens`, text in UpgradeCar.str: "You do not have

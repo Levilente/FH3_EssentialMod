@@ -2,7 +2,7 @@
 
 Everything is in [`include/fh3mod.h`](../include/fh3mod.h). This page goes through it member by member.
 
-**API versions.** The numbering continues the FH2 platform's, so a mod written for it keeps its version checks: version 2 added file overrides, database patches and interfaces between mods, 3 hooks, 4 the Mods page, 5 its sliders, 6 mod descriptions and link rows, 7 byte patches and instruction hooks, 8 pages of your own, 9 title-screen entries, choice rows, online play (FH2MP), sessions, snapshots, hotkeys and commands, 10 `add_string_key` (strings for FH3's hashed string tables) 11 custom garage upgrades (`register_upgrade`) and 12 `upgrade_car_model`. The FH3 Mod Platform 1.0.4 has API version 12. Check `api->api_version` (or `api->size`) before using anything added after version 1. Where a section below says "platform 2.x", that is the FH2 platform release the feature first appeared in; the version to check is the API version.
+**API versions.** The numbering continues the FH2 platform's, so a mod written for it keeps its version checks: version 2 added file overrides, database patches and interfaces between mods, 3 hooks, 4 the Mods page, 5 its sliders, 6 mod descriptions and link rows, 7 byte patches and instruction hooks, 8 pages of your own, 9 title-screen entries, choice rows, online play (FH2MP), sessions, snapshots, hotkeys and commands, 10 `add_string_key` (strings for FH3's hashed string tables) 11 custom garage upgrades (`register_upgrade`) and 12 `upgrade_car_model`. The FH3 Mod Platform 1.0.0 has API version 12. Check `api->api_version` (or `api->size`) before using anything added after version 1. Where a section below says "platform 2.x", that is the FH2 platform release the feature first appeared in; the version to check is the API version.
 
 **What is not in FH3 yet.** `add_page` (pages of your own, API 8) and `add_title_entry` (title-screen entries, API 9) return 0 and say why in the log: they need game addresses that were only found for FH2. Everything else in this file works in the FH3 platform; the Mods page, its rows, update checks, file overrides, database patches and the upgrade bridge are the parts the FH3 port added or reworked.
 
@@ -794,9 +794,9 @@ int32_t  upgrade_car_model(int32_t garage);   // API 12
 
 Stage prices are charged by the platform when the player confirms the setup in the shop; stages that were bought stay owned, and switching back to an owned stage is free.
 
-### Shop preview (platform 1.0.2)
+### Shop preview
 
-While the player looks at a stage of your upgrade in the shop (moves the cursor onto it), `upgrade_stage` returns **that** stage for the car, and the shop rebuilds the car the same way it does for its own parts. So an upgrade whose effect is built into the car shows on hover, before it is bought, with no extra code. What `upgrade_stage` returns for the car in the shop (platform 1.0.10):
+While the player looks at a stage of your upgrade in the shop (moves the cursor onto it), `upgrade_stage` returns **that** stage for the car, and the shop rebuilds the car the same way it does for its own parts. So an upgrade whose effect is built into the car shows on hover, before it is bought, with no extra code. What `upgrade_stage` returns for the car in the shop (platform 1.0.0):
 
 - **cursor on a stage**: that stage, for 300 ms after the cursor moved there. That covers the rebuild the shop starts on each cursor move (it comes within about 50 ms). Backing out of the list rebuilds the car with no call the platform can see, so a later rebuild must not get the hovered stage;
 - **a stage in the basket**: that stage, until the setup is installed or abandoned, or another car is driven, like the game's own basket parts;
@@ -813,9 +813,9 @@ For your upgrade to show on hover:
 
 Universal Wheel Spacers is the example: its hook on the car loader asks `upgrade_stage` for the front and rear stage every time the game builds a car and adds the width to the track values, so the wheels move out as the cursor goes down the stages.
 
-### The game's part set (platform 1.0.1)
+### The game's part set
 
-The game keeps a car's parts in a set of 43 slots (part enums 0 to 42) and the car's tuning right after it. Bridge upgrades use enums 47 and up, so they are **not** in that set: the platform keeps them out of it (the game's part setter has no bounds check, and before 1.0.1 a stage of a bridge upgrade overwrote tuning values such as the brake balance and the handbrake). The stage of a bridge upgrade is only what `upgrade_stage` says; don't look for it in the game's part data.
+The game keeps a car's parts in a set of 43 slots (part enums 0 to 42) and the car's tuning right after it. Bridge upgrades use enums 47 and up, so they are **not** in that set: the platform keeps them out of it (the game's part setter has no bounds check, and a stage of a bridge upgrade written there would overwrite tuning values such as the brake balance and the handbrake). The stage of a bridge upgrade is only what `upgrade_stage` says; don't look for it in the game's part data.
 
 ## Crash reports
 
