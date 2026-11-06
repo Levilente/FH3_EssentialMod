@@ -1,0 +1,38 @@
+name: Release 1.0.0 (one-off)
+
+# Runs when the branch release-1.0.0 is pushed: builds the DLL on GitHub and
+# publishes the v1.0.0 release (the tag is created by the release).
+
+on:
+  push:
+    branches: ["release-1.0.0"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    env:
+      LLVM_MINGW_VERSION: "20260922"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Install llvm-mingw + ninja
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build
+          curl -fsSL "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_VERSION}/llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-22.04-x86_64.tar.xz" -o llvm-mingw.tar.xz
+          sudo mkdir -p /opt/llvm-mingw
+          sudo tar -xJf llvm-mingw.tar.xz -C /opt/llvm-mingw --strip-components=1
+      - name: Build into dist/
+        env:
+          CMAKE_GENERATOR: Ninja
+        run: ./scripts/build.sh
+      - name: Zip and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          (cd dist && zip -r -9 ../FH3-Mod-Platform-v1.0.0.zip .)
+          awk '/^## /{n++} n==1' CHANGELOG.md > notes.md
+          gh release create v1.0.0 FH3-Mod-Platform-v1.0.0.zip --target "$GITHUB_SHA" --title "FH3 Mod Platform v1.0.0" --notes-file notes.md
