@@ -467,20 +467,52 @@ int detour_memcmp(const void* x, const void* y, size_t n) {
 QueryBuildB g_orig_show = nullptr;
 std::atomic<int> g_show_logged{0};
 void* detour_show(uint64_t car, uint64_t e, uint64_t part, uint64_t d, uint64_t flag, uint64_t g, uint64_t h, uint64_t i, uint64_t j) {
-    if (static_cast<int>(e) > 43) {
-        int st = 0;
-        Upgrade* u = by_part(static_cast<long>(static_cast<int>(part)), &st);
-        if (u && u->penum() == static_cast<int>(e)) {
-            const bool shop = (flag & 0xFF) != 0;
-            if (shop) {
-                u->preview_gid.store(static_cast<long>(g_active.load()));
-                u->preview.store(st);
+    const bool shop = (flag & 0xFF) != 0;
+    const int en    = static_cast<int>(e);
+    if (shop) {
+        if (en > 43) {
+            // Each upgrade of ours has its own enum. A part id that isn't one of its stages is the game putting back
+            // what the car had (it reads that from past the part set, where our parts never are): the preview ends.
+            const int n = g_count.load();
+            for (int q = 0; q < n; ++q) {
+                Upgrade* u = g_up[q];
+                if (u->penum() != en) continue;
+                const long s = static_cast<long>(static_cast<int>(part)) - u->part(0);
+                if (s >= 0 && s < u->count()) {
+                    u->preview_gid.store(static_cast<long>(g_active.load()));
+                    u->preview.store(static_cast<int>(s));
+                } else {
+                    u->preview.store(-1);
+                }
+                if (g_show_logged.fetch_add(1) < 300)
+                    plog("upgrades: " + u->id + (s >= 0 && s < u->count() ? " stage " + std::to_string(s) + " shown in the shop (preview)"
+                                                                       : " back to the fitted stage (part " + std::to_string(static_cast<int>(part)) + ")"));
             }
-            if (g_show_logged.fetch_add(1) < 40)
-                plog("upgrades: " + u->id + " stage " + std::to_string(st) + (shop ? " shown in the shop (preview)" : " set on the car"));
+        } else {
+            // The cursor is on one of the game's own parts: none of ours is on screen any more.
+            clear_previews();
         }
     }
     return g_orig_show(car, e, part, d, flag, g, h, i, j);
+}
+
+// Car rebuilds (0x3939F0, called by the show step with refresh on): logged with the caller, to find the shop's
+// other ways of putting the car back (diagnostics, capped).
+QueryBuildA g_orig_rebuild = nullptr;
+std::atomic<int> g_rebuild_logged{0};
+void* detour_rebuild(void* car, void* x, int y) {
+    if (g_rebuild_logged.fetch_add(1) < 300) {
+        const uintptr_t ret = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+        const uintptr_t gb  = reinterpret_cast<uintptr_t>(game());
+        int pv = -1;
+        const int n = g_count.load();
+        for (int q = 0; q < n; ++q) pv = std::max(pv, g_up[q]->preview.load());
+        char buf[160];
+        snprintf(buf, sizeof buf, "upgrades: car rebuilt (caller game+0x%llX, preview %s)", static_cast<unsigned long long>(gb && ret > gb ? ret - gb : 0),
+                 pv >= 0 ? "on" : "off");
+        plog(buf);
+    }
+    return g_orig_rebuild(car, x, y);
 }
 
 // The game's part setter (0x36B7A0: enum, part id, ..., part set, change list) stores the part at set + 8 + 4*enum
@@ -665,6 +697,7 @@ void install_hooks() {
         {0x410750, reinterpret_cast<void*>(detour_qb), "upgrades: query builder B", reinterpret_cast<void**>(&g_orig_qb)},
         {0x36B7A0, reinterpret_cast<void*>(detour_partset), "upgrades: part setter", reinterpret_cast<void**>(&g_orig_partset)},
         {0x38D0B0, reinterpret_cast<void*>(detour_show), "upgrades: show part on car", reinterpret_cast<void**>(&g_orig_show)},
+        {0x3939F0, reinterpret_cast<void*>(detour_rebuild), "upgrades: car rebuild (log)", reinterpret_cast<void**>(&g_orig_rebuild)},
     };
     for (const H& h : hooks) hook_game_function(h.rva, h.detour, h.what, h.orig);
     install_basket_patch(reinterpret_cast<uintptr_t>(find_game()));

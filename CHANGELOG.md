@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.3
+
+- Shop preview: the preview ends when the shop puts the fitted part back (backing out of the list) or moves on to one of the game's own parts, not only on purchase, Abandon or another car. Car rebuilds are logged with their caller (diagnostics).
+
 ## 1.0.2
 
 - **Upgrade bridge: shop preview.** While a stage of a bridge upgrade is looked at in the shop, `upgrade_stage` returns that stage for the car (the game's "show this part" step, `game+0x38D0B0`, is hooked), and the shop rebuilds the car as it does for its own parts. A mod that builds the car from `upgrade_stage` shows the stage on hover. The preview ends with the purchase, when the shop is left without buying, or when another car is driven.
