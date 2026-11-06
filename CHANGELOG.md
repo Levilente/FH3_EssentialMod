@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- **Which of the player's cars is this? (API 14)**: `upgrade_garage_for_car(car_id, flags)` answers from the car's model and the player's garage (read from the save), and can make that car the driven one. The driven garage id the platform learned from the game's statements lagged behind a car switch at an event's car select by several seconds, so a car chosen there ran without its custom upgrades (nitro, wheel spacers) until the game saved it as driven.
+- **The platform follows the player's car itself (API 14)**: it reads the player's garage from the save and watches the car the player drives (the HUD's car), so the driven car, `upgrade_stage(handle, 0)`, `upgrade_active_garage` and the stage callbacks are right for every mod at once: a car switch at an event's car select no longer leaves the chosen car without its custom upgrades until the game saves it, and a car that isn't one of the player's (a loaner) gets stage 0 and garage 0, without code in the mod. Before, the driven garage id came only from the game's statements and lagged behind such a switch by several seconds.
+- `upgrade_garage_for_car(car_id, flags)` and `upgrade_stage_for_car(mod, handle, car_id)` (API 14): which of the player's cars a car the game builds is, and your stage on it, for mods that change a car while it is built (wheel spacers).
 - **Tuning rows (API 13)**: `add_tuning_row` adds a slider to the car's Tuning > Springs page (bound to custom AVUI properties, optional per-car `visible` callback).
 
 ## 1.0.0

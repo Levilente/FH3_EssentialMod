@@ -557,9 +557,12 @@ typedef struct FH3ModApi {
        every car until another stage is bought. Call from fh3mod_init. Returns a handle (>= 0) or -1 (the log
        says why). Up to 8 upgrades in all, up to 10 stages each. */
     int (*register_upgrade)(FH3Mod* mod, const FH3UpgradeDef* def);
-    /* The stage fitted on the car with that garage id (0 = stock), or on the car being driven if garage <= 0. */
+    /* The stage fitted on the car with that garage id (0 = stock), or on the car being driven if garage <= 0 (0 when
+       the car being driven isn't one of the player's, a loaner; from API 14 the platform follows the player's car
+       itself, so a car switch at an event's car select or a loaner needs nothing from the mod). */
     int (*upgrade_stage)(FH3Mod* mod, int handle, int32_t garage);
-    /* The garage id of the car being driven (0 = not known yet). */
+    /* The garage id of the car being driven (0 = not known yet, or, from API 14, the driven car isn't one of the
+       player's). The stage callbacks run with garage 0, stage 0 when the player gets into such a car. */
     uint32_t (*upgrade_active_garage)(void);
     /* One-time move of a mod's own earlier per-car data to the platform: car `garage` (model `ordinal`, 0 if not
        known) had `stage` fitted and owns the stages whose bits are set in `owned_mask` (bit n = stage n). */
@@ -587,6 +590,10 @@ typedef struct FH3ModApi {
        car (upgrade_active_garage, the stage callbacks run). Use it when the game builds or drives a car: the driven
        garage id the platform learns from the game's statements can lag behind a car switch by several seconds. */
     int32_t (*upgrade_garage_for_car)(int32_t car_id, uint32_t flags);
+    /* The stage of your upgrade on a car the game builds, by the car's Data_Car id: the stage of the player's car of
+       that model (see upgrade_garage_for_car; it becomes the driven car), 0 when it isn't one of the player's cars.
+       The call for a mod that changes a car while the game builds it (wheel spacers: the car's track). */
+    int (*upgrade_stage_for_car)(FH3Mod* mod, int handle, int32_t car_id);
 } FH3ModApi;
 
 #define FH3MOD_CAR_MAKE_DRIVEN 1u   /* upgrade_garage_for_car: make the car found the driven car */

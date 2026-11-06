@@ -62,6 +62,7 @@ std::atomic<int> g_count{0};
 std::mutex g_reg_mu;
 std::atomic<bool> g_started{false};
 std::atomic<unsigned> g_active{0};   // garage id of the car being driven
+std::atomic<bool> g_foreign{false};  // the car being driven isn't one of the player's (a loaner): no custom upgrades
 std::atomic<long> g_cur_ord{0};      // car ordinal of the last UpgradeParts view
 
 std::wstring ini_path() { return (azimuth_dir() / L"fh3-mods" / L"platform-upgrades.ini").wstring(); }
@@ -168,7 +169,16 @@ void clear_previews() {
 }
 
 void activate(unsigned gid, const char* why = "") {
-    if (gid == 0 || gid >= 2000000000u || gid == g_active.load()) return;
+    if (gid == 0 || gid >= 2000000000u) return;
+    if (gid == g_active.load()) {
+        if (g_foreign.exchange(false)) {   // back in the player's own car
+            plog("upgrades: driven car is garage " + std::to_string(gid) + " again (" + why + ")");
+            const int n = g_count.load();
+            for (int i = 0; i < n; ++i) notify(g_up[i], gid, get_stage(g_up[i], gid, 0));
+        }
+        return;
+    }
+    g_foreign.store(false);
     clear_previews();
     for (int i = 0; i < g_count.load(); ++i) g_up[i]->pend.store(false);   // a basket belongs to the car it was filled for
     plog("upgrades: driven car is garage " + std::to_string(gid) + " (was " + std::to_string(g_active.load()) + ", " + why + ")");
@@ -674,6 +684,11 @@ __asm__(".text\n.globl fh3_basket_stub\nfh3_basket_stub:\n"
         "add $8,%rsp\n"
         "jmp *g_fh3_skip_target(%rip)\n"
         "1: ret\n");
+// the player's car, from the HUD controller (defined below the shop code)
+uint64_t detour_hud(void* c, void* a, void* b, void* d);
+typedef uint64_t (*HudCtrlFn)(void*, void*, void*, void*);
+HudCtrlFn g_orig_hud = nullptr;
+
 namespace {
 
 void install_basket_patch(uintptr_t base) {
@@ -868,6 +883,7 @@ void install_hooks() {
         {0x16F7ED0, reinterpret_cast<void*>(detour_camera), "upgrades: shop camera for a part", reinterpret_cast<void**>(&g_orig_camera)},
     };
     for (const H& h : hooks) hook_game_function(h.rva, h.detour, h.what, h.orig);
+    hook_game_function_shared(0xB26690, reinterpret_cast<void*>(detour_hud), "upgrades: the player's car (HUD controller)", reinterpret_cast<void**>(&g_orig_hud));
     install_basket_patch(reinterpret_cast<uintptr_t>(find_game()));
     // seed the car being driven from the last session, until the game's statements say which it is
     const unsigned last = GetPrivateProfileIntW(L"general", L"LastGarage", 0, ini_path().c_str());
@@ -985,6 +1001,7 @@ static Upgrade* handle_upgrade(int h) {
 int upgrades_stage(int handle, int32_t garage) {
     Upgrade* u = handle_upgrade(handle);
     if (!u) return 0;
+    if (garage <= 0 && g_foreign.load()) return 0;   // the driven car isn't the player's
     const long gid = garage > 0 ? garage : static_cast<long>(g_active.load());
     // In the shop, the stage being looked at, so a mod can show it on the car before it is bought.
     // Only for the rebuild the show step starts (the game builds the car within ~50 ms of it). When the cursor leaves the
@@ -1000,7 +1017,7 @@ int upgrades_stage(int handle, int32_t garage) {
     }
     return get_stage(u, gid, 0);
 }
-uint32_t upgrades_active_garage() { return g_active.load(); }
+uint32_t upgrades_active_garage() { return g_foreign.load() ? 0u : g_active.load(); }
 
 int32_t upgrades_car_model(int32_t garage) {
     if (garage <= 0) return 0;
@@ -1049,6 +1066,55 @@ int32_t upgrades_garage_for_car(int32_t car_id, uint32_t flags) {
         activate(static_cast<unsigned>(best), r.c_str());
     }
     return static_cast<int32_t>(best);
+}
+
+int upgrades_stage_for_car(int handle, int32_t car_id) {
+    const int32_t g = upgrades_garage_for_car(car_id, FH3MOD_CAR_MAKE_DRIVEN);
+    return g > 0 ? upgrades_stage(handle, g) : 0;
+}
+
+// ---- the car the player drives ----------------------------------------------------------------------------------
+// The HUD speedometer controller (game+0xB26690, rcx = controller) holds a weak pointer to the player's Car at
+// +0x120 (+0x128 its control block); the Car's spec (+0x110) holds the Data_Car id at +0x30. A few times a second
+// the platform checks which car that is: one of the player's (it becomes the driven car, so every mod's stage
+// callback and upgrade_stage follow a car switch at once) or none of them (a loaner: no custom upgrades on it).
+
+void driven_car_seen(int32_t car_id) {
+    static std::atomic<int32_t> last{0};
+    if (car_id < 100 || car_id >= 100000000) return;
+    bool known = false;
+    {
+        std::scoped_lock lk{g_gar_mu};
+        known = !g_gar_car.empty();
+    }
+    if (!known) return;   // the garage isn't read yet: nothing to compare with
+    const int32_t g = upgrades_garage_for_car(car_id, FH3MOD_CAR_MAKE_DRIVEN | FH3MOD_CAR_IS_PLAYERS);
+    if (g > 0) {
+        if (g_foreign.load()) activate(static_cast<unsigned>(g), "the player's car again");
+    } else if (!g_foreign.exchange(true)) {
+        plog("upgrades: the driven car (Data_Car " + std::to_string(car_id) + ") isn't one of the player's cars: no custom upgrades on it");
+        clear_previews();
+        const int n = g_count.load();
+        for (int i = 0; i < n; ++i) notify(g_up[i], 0, 0);
+    }
+    if (last.exchange(car_id) != car_id)
+        plog("upgrades: the player drives Data_Car " + std::to_string(car_id) + (g > 0 ? ", garage car " + std::to_string(g) : std::string(", not one of the player's cars")));
+}
+
+uint64_t detour_hud(void* c, void* a, void* b, void* d) {
+    const uint64_t r = g_orig_hud(c, a, b, d);
+    static std::atomic<uint64_t> next{0};
+    const uint64_t now = GetTickCount64();
+    if (now < next.load()) return r;
+    next.store(now + 250);
+    if (!c || !readable(static_cast<char*>(c) + 0x120, 16)) return r;
+    char* car = *reinterpret_cast<char**>(static_cast<char*>(c) + 0x120);
+    void* cb  = *reinterpret_cast<void**>(static_cast<char*>(c) + 0x128);
+    if (!car || !cb || !readable(car + 0x110, 8)) return r;
+    char* spec = *reinterpret_cast<char**>(car + 0x110);
+    if (!spec || !readable(spec + 0x30, 4)) return r;
+    driven_car_seen(*reinterpret_cast<int32_t*>(spec + 0x30));
+    return r;
 }
 
 void upgrades_import(int handle, int32_t garage, int32_t ordinal, int stage, uint32_t owned_mask_in) {

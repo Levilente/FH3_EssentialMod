@@ -1611,6 +1611,22 @@ void fill_hook_api(FH3ModApi& api) {
     api.hook_instruction = api_hook_instruction;
 }
 
+// A hook the platform needs on a function that mods may hook too: it goes into the same chain as theirs (a plain
+// MinHook hook would make their hook_function fail). Waits for the game's code; call it from a thread of its own.
+void* hook_game_function_shared(uint32_t rva, void* detour, const char* what, void** original) {
+    static FH3Mod self = [] { FH3Mod m; m.name = "FH3 Mod Platform"; m.wname = L"FH3 Mod Platform"; return m; }();
+    while (!code_ready()) Sleep(50);
+    char* game = static_cast<char*>(find_game());
+    if (!game) return nullptr;
+    FH3Hook* h = api_hook_function(&self, what, game + rva, detour, original);
+    if (!h || !api_enable_hooks(&self, h)) {
+        plog(std::string("can't hook ") + what + " (shared) at game+" + hex(rva));
+        return nullptr;
+    }
+    plog(std::string("hooked ") + what + " (shared) at game+" + hex(rva));
+    return original ? *original : nullptr;
+}
+
 // For crash reports: which hook's trampoline or stub `p` is in.
 bool hook_at(const void* p, char* out, std::size_t n) {
     const auto a  = reinterpret_cast<uintptr_t>(p);
