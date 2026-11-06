@@ -2,7 +2,7 @@
 
 Everything is in [`include/fh3mod.h`](../include/fh3mod.h). This page goes through it member by member.
 
-**API versions.** The numbering continues the FH2 platform's, so a mod written for it keeps its version checks: version 2 added file overrides, database patches and interfaces between mods, 3 hooks, 4 the Mods page, 5 its sliders, 6 mod descriptions and link rows, 7 byte patches and instruction hooks, 8 pages of your own, 9 title-screen entries, choice rows, online play (FH2MP), sessions, snapshots, hotkeys and commands, 10 `add_string_key` (strings for FH3's hashed string tables) and 11 custom garage upgrades (`register_upgrade`). The FH3 Mod Platform 1.0.0 has API version 11. Check `api->api_version` (or `api->size`) before using anything added after version 1. Where a section below says "platform 2.x", that is the FH2 platform release the feature first appeared in; the version to check is the API version.
+**API versions.** The numbering continues the FH2 platform's, so a mod written for it keeps its version checks: version 2 added file overrides, database patches and interfaces between mods, 3 hooks, 4 the Mods page, 5 its sliders, 6 mod descriptions and link rows, 7 byte patches and instruction hooks, 8 pages of your own, 9 title-screen entries, choice rows, online play (FH2MP), sessions, snapshots, hotkeys and commands, 10 `add_string_key` (strings for FH3's hashed string tables) 11 custom garage upgrades (`register_upgrade`) and 12 `upgrade_car_model`. The FH3 Mod Platform 1.0.4 has API version 12. Check `api->api_version` (or `api->size`) before using anything added after version 1. Where a section below says "platform 2.x", that is the FH2 platform release the feature first appeared in; the version to check is the API version.
 
 **What is not in FH3 yet.** `add_page` (pages of your own, API 8) and `add_title_entry` (title-screen entries, API 9) return 0 and say why in the log: they need game addresses that were only found for FH2. Everything else in this file works in the FH3 platform; the Mods page, its rows, update checks, file overrides, database patches and the upgrade bridge are the parts the FH3 port added or reworked.
 
@@ -783,11 +783,13 @@ int      register_upgrade(FH3Mod* mod, const FH3UpgradeDef* def);
 int      upgrade_stage(FH3Mod* mod, int handle, int32_t garage);
 uint32_t upgrade_active_garage(void);
 void     upgrade_import(FH3Mod* mod, int handle, int32_t garage, int32_t ordinal, int stage, uint32_t owned_mask);
+int32_t  upgrade_car_model(int32_t garage);   // API 12
 ```
 
 - `register_upgrade` (call it from `fh3mod_init`) returns a handle (the slot, 0 or more) or -1; the log says why. `size` must be `sizeof(FH3UpgradeDef)`.
 - `on_stage` is called on the game's thread when the stage on a car becomes known or changes: the player drove another car, or a stage was installed. Keep it short.
 - `upgrade_stage` is the stage fitted on the car with that garage id (0 is stock), or on the car being driven if `garage <= 0`; `upgrade_active_garage` is the garage id of the car being driven (0 until known).
+- `upgrade_car_model` (API 12) returns the model (car ordinal) the platform has recorded for a garage id, or 0 if unknown. A mod that finds the driven car's model itself can compare the two: when they differ the game has put the player in another car (a mission loaner), and the garage car's upgrades do not apply. NitroSystem II uses it to switch off nitro in such cars.
 - `upgrade_import` moves a mod's own earlier per-car data to the platform once: car `garage` (model `ordinal`, or 0) had `stage` fitted and owns the stages whose bits are set in `owned_mask`. NitroSystem II uses it to bring its FH2-style per-car stages over.
 
 Stage prices are charged by the platform when the player confirms the setup in the shop; stages that were bought stay owned, and switching back to an owned stage is free.

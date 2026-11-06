@@ -824,6 +824,17 @@ int upgrades_stage(int handle, int32_t garage) {
 }
 uint32_t upgrades_active_garage() { return g_active.load(); }
 
+int32_t upgrades_car_model(int32_t garage) {
+    if (garage <= 0) return 0;
+    std::scoped_lock lk{g_car_mu};
+    const int n = g_count.load();
+    for (int i = 0; i < n; ++i) {
+        const long o = car_locked(g_up[i], garage).ord;
+        if (o > 0) return static_cast<int32_t>(o);
+    }
+    return 0;
+}
+
 void upgrades_import(int handle, int32_t garage, int32_t ordinal, int stage, uint32_t owned_mask_in) {
     Upgrade* u = handle_upgrade(handle);
     if (!u || garage <= 0 || stage < 0 || stage >= u->count()) return;

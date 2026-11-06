@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.4
+
+- API 12: `upgrade_car_model(garage)` returns the model recorded for a garage car, so a mod can tell when the player is in another car than the garage car it believes is driven (mission loaners).
+- The log says which query switched the driven car (`upgrades: driven car is garage N (was M, why)`).
+
 ## 1.0.3
 
 - Shop preview: the preview ends when the shop puts the fitted part back (backing out of the list) or moves on to one of the game's own parts, not only on purchase, Abandon or another car. Car rebuilds are logged with their caller (diagnostics).

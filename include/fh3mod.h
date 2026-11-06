@@ -33,7 +33,7 @@
 extern "C" {
 #endif
 
-#define FH3MOD_API_VERSION 11
+#define FH3MOD_API_VERSION 12
 
 #ifdef __cplusplus
 #define FH3MOD_EXPORT extern "C" __declspec(dllexport)
@@ -558,6 +558,13 @@ typedef struct FH3ModApi {
     /* One-time move of a mod's own earlier per-car data to the platform: car `garage` (model `ordinal`, 0 if not
        known) had `stage` fitted and owns the stages whose bits are set in `owned_mask` (bit n = stage n). */
     void (*upgrade_import)(FH3Mod* mod, int handle, int32_t garage, int32_t ordinal, int stage, uint32_t owned_mask);
+    /* ==== API version 12: check api_version >= 12 ======================== */
+
+    /* The model (car ordinal, the number in the game's car spec) the platform has recorded for the car with that
+       garage id, or 0 if it doesn't know yet (it learns it when the car is seen in the upgrade shop). A mod
+       can compare it with the model of the car it finds being driven: when they differ, the game has put the
+       player in another car (a loaner in a mission), and the garage car's upgrades don't apply. */
+    int32_t (*upgrade_car_model)(int32_t garage);
 } FH3ModApi;
 
 #define FH3_TABLE_UPGRADES 0x968719E9u      /* Upgrades.str: Upgrades.Name / Description */

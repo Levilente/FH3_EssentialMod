@@ -44,6 +44,7 @@ int upgrades_register(FH3Mod* mod, const FH3UpgradeDef* def, const std::function
                       const std::function<void(const std::string&)>& add_sql);
 int upgrades_stage(int handle, int32_t garage);
 uint32_t upgrades_active_garage();
+int32_t upgrades_car_model(int32_t garage);
 void upgrades_import(int handle, int32_t garage, int32_t ordinal, int stage, uint32_t owned_mask);
 void upgrades_start_hooks();
 void* upgrades_live_db();

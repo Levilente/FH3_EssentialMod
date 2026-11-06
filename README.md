@@ -27,7 +27,7 @@ on start, and it loads every mod DLL in the `fh3-mods` folder.
 
 **For mod makers**
 
-- A C/C++ API (`include/fh3mod.h`, API version 11, documented in [`docs/api.md`](docs/api.md)): game-text edits, game-file overrides, database patches
+- A C/C++ API (`include/fh3mod.h`, API version 12, documented in [`docs/api.md`](docs/api.md)): game-text edits, game-file overrides, database patches
   (`add_sql`), string-table keys for FH3's hashed tables, Mods-page rows (On/Off, sliders, choices), hooks and byte patches, hotkeys, commands
   (`fh3mod.exe`), interfaces between mods, sessions, save snapshots, and the **upgrade bridge** (`register_upgrade`).
 - A mod is one DLL; [`docs/writing-a-mod.md`](docs/writing-a-mod.md) goes from an empty folder to a release. [`examples/hello_mod`](examples/hello_mod/hello_mod.cpp) is the starting point.
