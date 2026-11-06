@@ -1,0 +1,30 @@
+name: Take down releases (one-off)
+
+# Runs when the branch unrelease is pushed: deletes every release and its tag,
+# then the release-* branches and the unrelease branch itself.
+
+on:
+  push:
+    branches: ["unrelease"]
+
+permissions:
+  contents: write
+
+jobs:
+  unrelease:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Delete releases, tags and helper branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -x
+          for t in $(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName'); do
+            gh release delete "$t" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          done
+          for t in $(gh api "repos/$GITHUB_REPOSITORY/tags?per_page=100" --jq '.[].name'); do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$t" || true
+          done
+          for b in $(gh api "repos/$GITHUB_REPOSITORY/branches?per_page=100" --jq '.[].name' | grep -E '^(release-|unrelease$)'); do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$b" || true
+          done
