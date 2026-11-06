@@ -1,5 +1,7 @@
 # FH2 mods on Linux (Wine and Proton)
 
+> Written for the FH2 platform; untested with FH3. The FH3 platform's own files are `DWrite.dll` and `d3dcompiler_47.dll`, as in the main README.
+
 > **FH2 notes.** Written for the FH2 platform; the FH3 platform is not tested on Linux yet, but the Azimuth/Wine setup is the same.
 
 FH2 mods run on Linux wherever Azimuth runs, under Wine or Proton. The platform needs nothing extra. Extra Options needs one setting, and a few mods have limits there. What's here was tested with Wine 9.0 or seen in Linux players' logs; Proton itself hasn't been tested directly.

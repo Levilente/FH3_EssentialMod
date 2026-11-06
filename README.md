@@ -8,12 +8,16 @@ Forza Horizon 3's code and menus.
 The platform is one DLL (`DWrite.dll`, also shipped as `d3dcompiler_47.dll`) next to `azimuth.exe`. Azimuth loads it
 on start, and it loads every mod DLL in the `fh3-mods` folder.
 
+![The MODS tile on the Home tab, with Exit to Desktop](docs/images/mods-tile-home.jpg)
+![The MODS tab: Installed mods, Updates, About, All settings, Get Mods](docs/images/mods-hub.jpg)
+![Installed mods, with each mod's version and description](docs/images/mods-installed.jpg)
+
 ## What you get
 
 **For players**
 
 - **MODS in the game's menus.** A MODS tile on the Home tab opens *Installed mods* (switch each mod on or off, open a mod's
-  settings), *Updates*, *About* and *All settings*. Mods put their own On/Off, slider and choice rows there, in the game's own style.
+  settings), *Updates*, *About*, *All settings* and *Get Mods* (opens the mod site in your browser). Mods put their own On/Off, slider and choice rows there, in the game's own style.
 - **Update checks.** Mods that name their GitHub repo get checked for new releases; the page tells you which one has an update.
 - **Custom upgrades in the garage.** Mods can add upgrades to **Garage > Upgrades** (name, stages, prices, icons) that are bought, fitted, stored per
   car and survive Abandon / Modified car prompts like the game's own parts. The first mod on it is NitroSystem II's Nitrous Kit.

@@ -1,5 +1,7 @@
 # API reference
 
+> Version numbers such as *platform 2.8.0* in this file are those of the FH2 platform this one was forked from. The FH3 Mod Platform starts at 1.0.0 (API version 12).
+
 Everything is in [`include/fh3mod.h`](../include/fh3mod.h). This page goes through it member by member.
 
 **API versions.** The numbering continues the FH2 platform's, so a mod written for it keeps its version checks: version 2 added file overrides, database patches and interfaces between mods, 3 hooks, 4 the Mods page, 5 its sliders, 6 mod descriptions and link rows, 7 byte patches and instruction hooks, 8 pages of your own, 9 title-screen entries, choice rows, online play (FH2MP), sessions, snapshots, hotkeys and commands, 10 `add_string_key` (strings for FH3's hashed string tables) 11 custom garage upgrades (`register_upgrade`) and 12 `upgrade_car_model`. The FH3 Mod Platform 1.0.0 has API version 12. Check `api->api_version` (or `api->size`) before using anything added after version 1. Where a section below says "platform 2.x", that is the FH2 platform release the feature first appeared in; the version to check is the API version.
