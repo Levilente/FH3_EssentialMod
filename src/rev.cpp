@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <thread>
 
 namespace fh3platform {
 
@@ -32,6 +33,7 @@ using TorqueFn = bool (*)(void*, float, float, void*, void*, uint64_t, uint64_t,
 TorqueFn g_orig = nullptr;
 std::atomic<int> g_enabled{1};
 std::atomic<int> g_logged{0};
+std::atomic<uint64_t> g_calls{0};
 std::atomic<uint64_t> g_pad_tick{0};
 std::atomic<float> g_rt{0.0f};
 
@@ -53,6 +55,7 @@ float trigger() {
 }
 
 bool detour_torque(void* self, float rpm, float throttle, void* r8, void* r9, uint64_t a5, uint64_t a6, uint64_t a7, uint64_t a8) {
+    g_calls.fetch_add(1);
     if (g_enabled.load() && GetTickCount64() - upgrades_shop_tick() < kShopMs && upgrades_shop_tick()) {
         const float rt = trigger();
         if (rt > throttle) {
@@ -76,6 +79,24 @@ void rev_start() {
     const std::wstring ini = (azimuth_dir() / L"fh3-mods" / L"platform-rev.ini").wstring();
     g_enabled = static_cast<int>(GetPrivateProfileIntW(L"rev", L"Enabled", 1, ini.c_str()));
     if (!g_enabled.load()) return;
+    std::thread([] {   // diagnostics: while RT is held, say what the hook sees
+        uint64_t last = 0;
+        int n = 0;
+        for (;;) {
+            Sleep(1000);
+            if (n >= 40) return;
+            const float rt = trigger();
+            const uint64_t c = g_calls.load();
+            if (rt < 0.3f) { last = c; continue; }
+            const uint64_t t = upgrades_shop_tick(), now = GetTickCount64();
+            char b[200];
+            snprintf(b, sizeof b, "rev: RT %.2f held; torque calls in the last second %llu; shop touched the car %lld ms ago",
+                     static_cast<double>(rt), static_cast<unsigned long long>(c - last), t ? static_cast<long long>(now - t) : -1LL);
+            plog(b);
+            last = c;
+            ++n;
+        }
+    }).detach();
     hook_game_function(RVA_TORQUE, reinterpret_cast<void*>(detour_torque), "rev: engine torque", reinterpret_cast<void**>(&g_orig));
 }
 
