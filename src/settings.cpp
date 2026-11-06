@@ -3383,12 +3383,9 @@ bool d_hud_page_button(void* page, int button, bool pressed) {
 }
 
 void d_tile_updates(void* page) { open_hub_page(page, kHubUpdates); }
-// GET MODS opens the mod site in the browser rather than a page of ours
-constexpr const char* kModSite = "https://fh3mods.refil.cc/mods";
-void d_tile_get_mods(void*) {
-    play_sound(kSoundSelect);
-    open_url(kModSite);
-}
+// GET MODS: there is no mod site for FH3 yet, so the tile does nothing (no sound, no page). When there is one it will
+// open it in the browser with open_url(), as the FH2 platform did.
+void d_tile_get_mods(void*) {}
 void d_tile_about(void* page) { open_hub_page(page, kHubAbout); }
 void d_tile_all_settings(void* page) { open_hub_page(page, kHubAllSettings); }
 void tile_installed(void* page) { open_hub_page(page, kHubInstalled); }
