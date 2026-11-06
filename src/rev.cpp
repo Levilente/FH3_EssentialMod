@@ -120,18 +120,17 @@ uint32_t g_saved[3][16];
 std::atomic<uint64_t> g_gcalls{0};
 std::atomic<float> g_gpeak{0.0f};
 uint64_t g_exp_calls0 = 0;
-void* g_live[3] = {nullptr, nullptr, nullptr};   // cars whose engine step ran during the experiment (the shown car)
-bool is_live(const void* c) { for (void* l : g_live) if (l == c) return true; return false; }
+constexpr int kMaxExp = 8;
+char* g_exp_cars[kMaxExp];
+int g_exp_n = 0;
+bool is_live(const void* c) { for (int k = 0; k < g_exp_n; ++k) if (g_exp_cars[k] == c) return true; return false; }   // a car the experiment is on
 
 bool is_garage_car(const void* c) {
     for (int k = 0; k < g_n_gar.load(); ++k) if (g_gar_car[k] == c) return true;
     return false;
 }
 
-constexpr int kMaxExp = 8;
-char* g_exp_cars[kMaxExp];
 uint32_t g_exp_saved[kMaxExp][16];
-int g_exp_n = 0;
 
 void exp_apply(char* c) {   // put the experiment's values on one car (once), remembering what was there
     if (g_exp_n >= kMaxExp || !readable(c, kSnap)) return;
@@ -152,7 +151,6 @@ void exp_step(bool in_garage) {
     if (!g_exp_on && rt > 0.8f && in_garage) {
         const ExpDef& e = kExps[g_exp % kNExp];
         g_exp_n = 0;
-        for (void*& l : g_live) l = nullptr;
         g_exp_on = true;
         g_gcalls = 0;
         g_gpeak = 0.0f;
@@ -170,7 +168,6 @@ void exp_step(bool in_garage) {
         plog(b);
         g_exp_on = false;
         g_exp_n = 0;
-        for (void*& l : g_live) l = nullptr;
         ++g_exp;
     }
 }
@@ -213,9 +210,6 @@ uint64_t detour_rel(void* self) {
 bool detour_torque(void* self, float rpm, float throttle, void* r8, void* r9, uint64_t a5, uint64_t a6, uint64_t a7, uint64_t a8) {
     g_calls.fetch_add(1);
     if (!is_garage_car(self) && !(g_exp_on && is_live(self))) g_last_torque_ms.store(GetTickCount64());
-    if (g_exp_on && GetTickCount64() - g_last_torque_ms.load() > 0 && !is_live(self)) {
-        for (void*& l : g_live) if (!l) { l = self; break; }
-    }
     if (g_exp_on && is_live(self)) {
         g_gcalls.fetch_add(1);
         if (rpm > g_gpeak.load()) g_gpeak = rpm;
