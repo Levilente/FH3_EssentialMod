@@ -685,6 +685,8 @@ __asm__(".text\n.globl fh3_basket_stub\nfh3_basket_stub:\n"
         "jmp *g_fh3_skip_target(%rip)\n"
         "1: ret\n");
 // the player's car, from the HUD controller (defined below the shop code)
+void* detour_loader(ARGS12);
+extern Fn12 g_orig_loader;
 uint64_t detour_hud(void* c, void* a, void* b, void* d);
 typedef uint64_t (*HudCtrlFn)(void*, void*, void*, void*);
 HudCtrlFn g_orig_hud = nullptr;
@@ -883,6 +885,7 @@ void install_hooks() {
         {0x16F7ED0, reinterpret_cast<void*>(detour_camera), "upgrades: shop camera for a part", reinterpret_cast<void**>(&g_orig_camera)},
     };
     for (const H& h : hooks) hook_game_function(h.rva, h.detour, h.what, h.orig);
+    hook_game_function_shared(0x19E6A80, reinterpret_cast<void*>(detour_loader), "PROBE: central car loader", reinterpret_cast<void**>(&g_orig_loader));
     hook_game_function_shared(0xB26690, reinterpret_cast<void*>(detour_hud), "upgrades: the player's car (HUD controller)", reinterpret_cast<void**>(&g_orig_hud));
     install_basket_patch(reinterpret_cast<uintptr_t>(find_game()));
     // seed the car being driven from the last session, until the game's statements say which it is
@@ -1101,6 +1104,52 @@ void driven_car_seen(int32_t car_id) {
         plog("upgrades: the player drives Data_Car " + std::to_string(car_id) + (g > 0 ? ", garage car " + std::to_string(g) : std::string(", not one of the player's cars")));
 }
 
+// ---- TEMPORARY PROBE: which car builds are the player's? -------------------------------------------------------------
+// Logs every call of the central car loader (game+0x19E6A80: rcx = spec, r8 = &Data_Car id) with its callers, and the
+// player's Car / spec from the HUD, to learn how the game builds the player's car and an AI car of the same model.
+Fn12 g_orig_loader = nullptr;
+std::atomic<int> g_probe_lines{0};
+void* detour_loader(ARGS12) {
+    void* bt[8] = {};
+    const USHORT nf = RtlCaptureStackBackTrace(1, 8, bt, nullptr);
+    void* r = g_orig_loader(PASS12);
+    if (g_probe_lines.fetch_add(1) < 400) {
+        char* spec = reinterpret_cast<char*>(a);
+        int id = 0;
+        if (c && readable(reinterpret_cast<void*>(c), 4)) id = *reinterpret_cast<int*>(c);
+        float tf = 0, tr = 0;
+        int sid = 0;
+        if (spec && readable(spec + 0xF8, 4)) { tf = *reinterpret_cast<float*>(spec + 0xF4); tr = *reinterpret_cast<float*>(spec + 0xF8); sid = *reinterpret_cast<int*>(spec + 0x30); }
+        char* g = game();
+        std::string chain;
+        for (USHORT i = 0; i < nf; ++i) {
+            char b[24];
+            const uintptr_t v = reinterpret_cast<uintptr_t>(bt[i]);
+            if (g && v >= reinterpret_cast<uintptr_t>(g) && v < reinterpret_cast<uintptr_t>(g) + 0x6000000) snprintf(b, sizeof b, " g+%llX", (unsigned long long)(v - reinterpret_cast<uintptr_t>(g)));
+            else snprintf(b, sizeof b, " %p", bt[i]);
+            chain += b;
+        }
+        char line[400];
+        snprintf(line, sizeof line, "PROBE build: car %d (spec id %d), spec %p, track %.3f/%.3f, thread %lu, d=%llX, active garage %u%s, callers%s", id, sid, spec, tf, tr,
+                 GetCurrentThreadId(), (unsigned long long)d, g_active.load(), g_foreign.load() ? " (foreign)" : "", chain.c_str());
+        plog(line);
+    }
+    return r;
+}
+
+void probe_hud_car(char* car, char* spec) {
+    static std::atomic<char*> last_car{nullptr}, last_spec{nullptr};
+    if (last_car.exchange(car) == car && last_spec.exchange(spec) == spec) return;
+    last_spec.store(spec);
+    if (g_probe_lines.fetch_add(1) >= 400) return;
+    int sid = 0;
+    float tf = 0, tr = 0;
+    if (spec && readable(spec + 0xF8, 4)) { sid = *reinterpret_cast<int*>(spec + 0x30); tf = *reinterpret_cast<float*>(spec + 0xF4); tr = *reinterpret_cast<float*>(spec + 0xF8); }
+    char line[200];
+    snprintf(line, sizeof line, "PROBE player's Car %p, spec %p (id %d, track %.3f/%.3f)", car, spec, sid, tf, tr);
+    plog(line);
+}
+
 uint64_t detour_hud(void* c, void* a, void* b, void* d) {
     const uint64_t r = g_orig_hud(c, a, b, d);
     static std::atomic<uint64_t> next{0};
@@ -1113,6 +1162,7 @@ uint64_t detour_hud(void* c, void* a, void* b, void* d) {
     if (!car || !cb || !readable(car + 0x110, 8)) return r;
     char* spec = *reinterpret_cast<char**>(car + 0x110);
     if (!spec || !readable(spec + 0x30, 4)) return r;
+    probe_hud_car(car, spec);
     driven_car_seen(*reinterpret_cast<int32_t*>(spec + 0x30));
     return r;
 }
