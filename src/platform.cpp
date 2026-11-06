@@ -1339,6 +1339,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
                 g_api.upgrade_active_garage = api_upgrade_active_garage;
                 g_api.upgrade_import    = api_upgrade_import;
                 g_api.upgrade_car_model = api_upgrade_car_model;
+                g_api.add_tuning_row    = tuning_row_add;
                 return load_mods(nullptr);
             },
             nullptr, 0, nullptr))

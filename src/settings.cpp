@@ -840,6 +840,108 @@ uint8_t* slot_descriptor(const wchar_t* n) {
     return desc;
 }
 
+
+// ---- slider rows on the garage's tuning menu (API 13) ------------------------------------------
+// A_TuningOptions.xaml binds each tuning slider to a view-model object (Tuning.RideHeightFront ...) with Value, Minimum,
+// Maximum ... of its own. A row of ours binds the same slider styles straight to two properties of the tuning view
+// model that the hook below makes up: FH3Mod_Tune_<n> (a float, the value) and FH3Mod_TuneVis_<n> (a bool, whether the
+// row shows for the car being tuned). Both ask the mod each time they are read.
+struct TuneRow {
+    FH3Mod* mod;
+    std::string key, label, help;
+    float fmin, fmax, fstep;
+    int decimals;
+    float (*get)(void*);
+    void (*set)(void*, float);
+    int (*visible)(void*);
+    void* user;
+    uint8_t* value_desc = nullptr;
+    uint8_t* vis_desc   = nullptr;
+};
+constexpr std::size_t kMaxTuneRows = 8;
+std::deque<TuneRow> g_tune_rows;      // guarded by g_mu; rows are never removed
+
+TuneRow* tune_row(std::size_t i) {
+    std::scoped_lock lk{g_mu};
+    return i < g_tune_rows.size() ? &g_tune_rows[i] : nullptr;
+}
+
+TuneRow* tune_row_by_desc(void* desc, bool* is_vis) {
+    std::scoped_lock lk{g_mu};
+    for (TuneRow& r : g_tune_rows) {
+        if (r.value_desc == desc) { *is_vis = false; return &r; }
+        if (r.vis_desc == desc) { *is_vis = true; return &r; }
+    }
+    return nullptr;
+}
+
+void** __cdecl tune_get(void** out, void* desc, void*) {
+    bool vis       = false;
+    TuneRow* r     = tune_row_by_desc(desc, &vis);
+    *out           = nullptr;
+    if (vis) {
+        bool v = true;
+        if (r && r->visible) {
+            __try {
+                v = r->visible(r->user) != 0;
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                v = false;
+            }
+        }
+        reinterpret_cast<BoxBoolFn>(g_base + RVA_BOX_BOOL)(out, &v);
+        return out;
+    }
+    float f = r ? r->fmin : 0;
+    if (r) {
+        __try {
+            f = r->get(r->user);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            f = r->fmin;
+        }
+    }
+    if (!std::isfinite(f)) f = r ? r->fmin : 0;
+    reinterpret_cast<BoxFloatFn>(g_base + RVA_BOX_FLOAT)(out, &f);
+    return out;
+}
+
+void __cdecl tune_set(void* desc, void*, uint8_t* value) {
+    bool vis   = false;
+    TuneRow* r = tune_row_by_desc(desc, &vis);
+    if (!r || vis || !value || !readable(value + 0x28, 4)) return;
+    float f = 0;
+    std::memcpy(&f, value + 0x28, sizeof f);
+    if (!std::isfinite(f)) return;
+    if (f < r->fmin) f = r->fmin;
+    if (f > r->fmax) f = r->fmax;
+    if (r->fstep > 0) f = r->fmin + std::round((f - r->fmin) / r->fstep) * r->fstep;
+    if (f > r->fmax) f = r->fmax;
+    __try {
+        r->set(r->user, f);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        log_line(r->mod->name, "crashed in its tuning row set for " + r->key);
+    }
+}
+
+void tune_void_set(void*, void*, uint8_t*) {}
+
+uint8_t* tune_descriptor(std::size_t i, bool vis) {
+    std::scoped_lock lk{g_desc_mu};
+    TuneRow* r = tune_row(i);
+    if (!r) return nullptr;
+    uint8_t*& slot = vis ? r->vis_desc : r->value_desc;
+    if (!slot) {
+        static std::deque<std::string> names;   // the descriptor keeps the pointer
+        names.push_back(std::string(vis ? "FH3Mod_TuneVis_" : "FH3Mod_Tune_") + std::to_string(i));
+        if (vis) {
+            void* bool_type = reinterpret_cast<TypeFn>(g_base + RVA_BOOL_TYPE)(0);
+            slot = new_descriptor(names.back().c_str(), reinterpret_cast<void*>(&tune_get), reinterpret_cast<void*>(&tune_void_set), bool_type);
+        } else if (g_sliders_ok) {
+            slot = new_descriptor(names.back().c_str(), reinterpret_cast<void*>(&tune_get), reinterpret_cast<void*>(&tune_set), nullptr, RVA_FLOAT_PROPERTY);
+        }
+    }
+    return slot;
+}
+
 using FindPropertyFn = uint8_t* (*)(uint8_t* type, uint8_t* name);
 FindPropertyFn o_find_property = nullptr;
 
@@ -891,6 +993,8 @@ uint8_t* custom_property(uint8_t* type, uint8_t* name) {
     for (int prop = 0; prop < kTileProps; ++prop)
         if (const int t = name_number(n, kTilePropNames[prop], static_cast<int>(kTileCount)); t >= 0) return tile_descriptor(prop, t);
     if (std::wcsncmp(n, L"FH3Mod_Slot_", 12) == 0) return slot_descriptor(n);
+    if (const int k = name_number(n, L"FH3Mod_Tune_", 64); k >= 0) return tune_descriptor(static_cast<std::size_t>(k), false);
+    if (const int k = name_number(n, L"FH3Mod_TuneVis_", 64); k >= 0) return tune_descriptor(static_cast<std::size_t>(k), true);
     Row* r = row_by_prop(n);
     return r ? descriptor_for(r) : nullptr;
 }
@@ -1722,6 +1826,69 @@ bool write_units_page() {
     page.insert(e + 2, rows);
     page.insert(rs, res);
     return set_file(&g_owner_mod, "UI/Scenes/Anthem/A_HUDOptions.xaml", page.data(), page.size()) != 0;
+}
+
+
+// A_TuningOptions.xaml with the mods' slider rows at the end of the Springs list (after Ride Height). The rows are the
+// game's own tuning rows (label, slider in the game's slider styles, number), each in a list item of its own so a row
+// that isn't shown for the car being tuned leaves no gap. If the file isn't as expected the game's own is used.
+std::string tune_row_xaml(std::size_t i, const TuneRow& r) {
+    const std::string n = std::to_string(i);
+    std::string x;
+    x += "                                <ListBoxItem Style=\"{StaticResource A_Style_ListBoxItem_List_Tuning}\" Tag=\"" + xml_escape(r.help) + "\"\r\n"
+         "                                             Visibility=\"{Binding Tuning.FH3Mod_TuneVis_" + n + ", Converter={StaticResource FH3Mod_TuneShow}}\">\r\n"
+         "                                <ItemsControl Style=\"{StaticResource A_Style_ItemsControl_1x3_TuningSpaced}\" Tag=\"" + xml_escape(r.help) + "\">\r\n"
+         "                                    <local:FZTextBlock Style=\"{StaticResource A_Style_FZTextBlock_Tune_ItemLabel}\"\r\n"
+         "                                                        Text=\"" + xml_escape(r.label) + "\"\r\n"
+         "                                                        HorizontalAlignment=\"Left\"\r\n"
+         "                                                        Grid.Column=\"0\" />\r\n"
+         "                                    <Grid Grid.Column=\"1\">\r\n"
+         "                                        <Slider x:Name=\"FH3Mod_Tune_Value_" + n + "\" Value=\"{Binding Tuning.FH3Mod_Tune_" + n + ", Mode=TwoWay}\" Minimum=\"" + num(r.fmin) +
+         "\" Maximum=\"" + num(r.fmax) + "\" LargeChange=\"" + num(r.fstep) + "\" SmallChange=\"" + num(r.fstep) + "\" Style=\"{StaticResource A_Style_Slider_Tuning_Adjust}\"/>\r\n"
+         "                                        <Slider Value=\"{Binding Tuning.FH3Mod_Tune_" + n + ", Mode=TwoWay}\" Minimum=\"" + num(r.fmin) + "\" Maximum=\"" + num(r.fmax) +
+         "\" LargeChange=\"" + num(r.fstep) + "\" SmallChange=\"" + num(r.fstep) + "\" Style=\"{StaticResource A_Style_Slider_Tuning_Adjust_ThumbOnly}\"/>\r\n"
+         "                                    </Grid>\r\n"
+         "                                    <local:FZTextBlock Style=\"{StaticResource A_Style_FZTextBlock_Tune_ItemValue}\"\r\n"
+         "                                                        Text=\"{Binding Tuning.FH3Mod_Tune_" + n + ", Converter={StaticResource FH3Mod_TuneNum_" + n + "}}\"\r\n"
+         "                                                        HorizontalAlignment=\"Right\"\r\n"
+         "                                                        Grid.Column=\"2\" />\r\n"
+         "                                </ItemsControl>\r\n"
+         "                                </ListBoxItem>\r\n";
+    return x;
+}
+
+bool write_tuning_page() {
+    std::vector<TuneRow> rows;
+    {
+        std::scoped_lock lk{g_mu};
+        rows.assign(g_tune_rows.begin(), g_tune_rows.end());
+    }
+    if (rows.empty()) {
+        remove_leftover_file("UI/Scenes/Anthem/A_TuningOptions.xaml");
+        return false;
+    }
+    std::string page = read_ui("Scenes/Anthem/A_TuningOptions.xaml");
+    const std::size_t sp   = page.find("x:Name=\"StackPanel_5_Springs\"");
+    const std::size_t sp_e = sp == std::string::npos ? sp : page.find("</local:CommonListBox>", sp);
+    const std::size_t rs_e = page.find("</Page.Resources>");
+    const std::size_t rd_e = rs_e == std::string::npos ? rs_e : page.rfind("</ResourceDictionary>", rs_e);
+    if (sp_e == std::string::npos || rd_e == std::string::npos || page.find("A_Style_Slider_Tuning_Adjust_ThumbOnly") == std::string::npos ||
+        page.find("A_Style_ListBoxItem_List_Tuning") == std::string::npos) {
+        slog("A_TuningOptions.xaml doesn't look as expected; no tuning rows");
+        remove_leftover_file("UI/Scenes/Anthem/A_TuningOptions.xaml");
+        return false;
+    }
+    std::string res = "            <local:FZBooleanToVisibilityConverter x:Key=\"FH3Mod_TuneShow\" UseHidden=\"false\" InvertResult=\"false\" />\r\n";
+    std::string xaml;
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        res += "            <local:NumUnitConverter x:Key=\"FH3Mod_TuneNum_" + std::to_string(i) + "\" FractionDigits=\"" + std::to_string(rows[i].decimals) + "\" ShowUnit=\"False\" />\r\n";
+        xaml += tune_row_xaml(i, rows[i]);
+    }
+    page.insert(sp_e, xaml);    // after the Springs list's last row (positions: the list comes before the resources)
+    page.insert(rd_e, res);
+    const bool ok = set_file(&g_owner_mod, "UI/Scenes/Anthem/A_TuningOptions.xaml", page.data(), page.size()) != 0;
+    slog(std::string("tuning menu: ") + std::to_string(rows.size()) + " slider row(s) " + (ok ? "written" : "NOT written"));
+    return ok;
 }
 
 // The Mods page (Settings > Mods, and the MODS tab's All settings): every mod's rows.
@@ -4125,6 +4292,38 @@ void hook_game_fh3() {
 
 // ---- the API ---------------------------------------------------------------------------------
 
+int tuning_row_add(FH3Mod* m, const FH3TuningRow* t) {
+    if (!m || !t || t->size < offsetof(FH3TuningRow, user) + sizeof(void*)) return 0;
+    if (!valid_key(t->key) || !t->label || !*t->label || !t->get || !t->set) {
+        log_line(m->name, "add_tuning_row: needs a key (letters, digits, _), a label, get and set");
+        return 0;
+    }
+    if (!(t->max > t->min) || !(t->step > 0)) {
+        log_line(m->name, std::string("add_tuning_row: ") + t->key + " needs max > min and step > 0");
+        return 0;
+    }
+    if (g_written.load()) {
+        log_line(m->name, std::string("add_tuning_row: ") + t->key + " came after the pages were written; add rows from fh3mod_init");
+        return 0;
+    }
+    std::scoped_lock lk{g_mu};
+    if (g_tune_rows.size() >= kMaxTuneRows) {
+        log_line(m->name, "add_tuning_row: too many tuning rows (8 at most)");
+        return 0;
+    }
+    for (const TuneRow& r : g_tune_rows)
+        if (r.mod == m && r.key == t->key) {
+            log_line(m->name, std::string("add_tuning_row: ") + t->key + " was already added");
+            return 0;
+        }
+    TuneRow& r = g_tune_rows.emplace_back();
+    r.mod = m; r.key = t->key; r.label = t->label; r.help = t->help ? t->help : "";
+    r.fmin = t->min; r.fmax = t->max; r.fstep = t->step; r.decimals = t->decimals;
+    r.get = t->get; r.set = t->set; r.visible = t->visible; r.user = t->user;
+    log_line(m->name, std::string("tuning row ") + t->key + " added");
+    return 1;
+}
+
 int settings_add(FH3Mod* m, const FH3Setting* s) {
     if (!m || !s || s->size < offsetof(FH3Setting, user) + sizeof(void*)) return 0;
     if (!kModsPage) {
@@ -4764,6 +4963,7 @@ void settings_start(const FH3ModApi* api) {
     for (int p = kHubInstalled; p <= kHubAbout && g_hub_files; ++p)
         if (p != kHubGetMods) g_hub_files = write_hub_page(p);
     if (!write_units_page()) remove_leftover_file("UI/Scenes/Anthem/A_HUDOptions.xaml");
+    write_tuning_page();
     const bool mods_page = write_mods_page();
     if (!mods_page) remove_leftover_file("UI/Scenes/Anthem/A_ModOptions.xaml");
     slog(std::to_string(n) + " row(s) on the Mods page, " + std::to_string(g_entries.size()) + " mod(s) on Installed mods" +

@@ -142,6 +142,8 @@ const char* hook_line(int i, bool* enabled);
 
 // settings.cpp: rows on the game's Mods page (API 4).
 int settings_add(FH3Mod* mod, const FH3Setting* setting);
+// Slider rows on the garage's tuning menu (API 13).
+int tuning_row_add(FH3Mod* mod, const FH3TuningRow* row);
 int settings_get(FH3Mod* mod, const char* key);
 void settings_set(FH3Mod* mod, const char* key, int value);
 float settings_get_slider(FH3Mod* mod, const char* key);

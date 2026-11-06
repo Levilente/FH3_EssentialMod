@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Tuning rows (API 13)**: `add_tuning_row` adds a slider to the car's Tuning > Springs page (bound to custom AVUI properties, optional per-car `visible` callback).
+
 ## 1.0.0
 
 First release of the **FH3 Mod Platform**, a fork of Trinculo54's FH2 Mod Platform for Forza Horizon 3 (Azimuth), mod API version 12.
