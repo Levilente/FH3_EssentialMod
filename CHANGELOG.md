@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.8
+
+- Shop preview: the previewed stage no longer stays on the car after backing out of the list or leaving the garage. The shop puts a setup on its car (`game+0x38BCD0`) when it enters or leaves a list and before each cursor move; the preview ends there, and the show step sets it again while the cursor is on a stage.
+
 ## 1.0.7
 
 - **Upgrade bridge: owned stages go into the basket at 0 CR, like the game's own owned parts.** Choosing a stage you already own (or Stock) used to skip the basket, so what was waiting for that slot (say Stage 3) stayed in it and Install Parts did nothing. The stage now replaces the waiting one in the basket and is fitted at the install without a charge.

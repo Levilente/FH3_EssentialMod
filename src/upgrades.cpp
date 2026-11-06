@@ -516,6 +516,31 @@ void* detour_rebuild(void* car, void* x, int y) {
     return g_orig_rebuild(car, x, y);
 }
 
+// The shop puts a whole setup (part set + tuning) on its car with 0x38BCD0 (car, part set, r8b, r9b, ...): when it
+// enters or leaves a part list, after a basket add, and before each cursor move (0x16F98E8, right before the show
+// step). Our stages are never in that set, so whatever it puts on the car isn't the stage on screen any more: the
+// preview ends here, and the show step that may follow sets it again. Without this the previewed stage stayed on
+// the car after backing out of the list, and even after leaving the garage.
+QueryBuildB g_orig_setup = nullptr;
+std::atomic<int> g_setup_logged{0};
+void* detour_setup(uint64_t car, uint64_t set, uint64_t c, uint64_t d, uint64_t e, uint64_t f, uint64_t g, uint64_t h, uint64_t i) {
+    bool had = false;
+    const int n = g_count.load();
+    for (int q = 0; q < n; ++q) had |= g_up[q]->preview.load() >= 0;
+    if (had) {
+        clear_previews();
+        if (g_setup_logged.fetch_add(1) < 200) {
+            const uintptr_t ret = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+            const uintptr_t gb  = reinterpret_cast<uintptr_t>(game());
+            char buf[160];
+            snprintf(buf, sizeof buf, "upgrades: the shop put a setup on the car (caller game+0x%llX): preview ended",
+                     static_cast<unsigned long long>(gb && ret > gb ? ret - gb : 0));
+            plog(buf);
+        }
+    }
+    return g_orig_setup(car, set, c, d, e, f, g, h, i);
+}
+
 // The game's part setter (0x36B7A0: enum, part id, ..., part set, change list) stores the part at set + 8 + 4*enum
 // without a bounds check. The part set is 0xB4 bytes (enum 43 lives at +4, 0..42 at +8) and the car's tuning setup
 // follows it directly, so a part of enum 47+ written there overwrote tuning values: NitroSystem's kit (enum 47) hit
@@ -754,6 +779,7 @@ void install_hooks() {
         {0x36B7A0, reinterpret_cast<void*>(detour_partset), "upgrades: part setter", reinterpret_cast<void**>(&g_orig_partset)},
         {0x38D0B0, reinterpret_cast<void*>(detour_show), "upgrades: show part on car", reinterpret_cast<void**>(&g_orig_show)},
         {0x3939F0, reinterpret_cast<void*>(detour_rebuild), "upgrades: car rebuild (log)", reinterpret_cast<void**>(&g_orig_rebuild)},
+        {0x38BCD0, reinterpret_cast<void*>(detour_setup), "upgrades: setup on the shop car", reinterpret_cast<void**>(&g_orig_setup)},
     };
     for (const H& h : hooks) hook_game_function(h.rva, h.detour, h.what, h.orig);
     install_basket_patch(reinterpret_cast<uintptr_t>(find_game()));
@@ -875,7 +901,7 @@ int upgrades_stage(int handle, int32_t garage) {
     const long gid = garage > 0 ? garage : static_cast<long>(g_active.load());
     // In the shop, the stage being looked at, so a mod can show it on the car before it is bought.
     if (const int pv = u->preview.load(); pv >= 0 && pv < u->count() && u->preview_gid.load() == gid) return pv;
-    return get_stage(u, garage > 0 ? garage : static_cast<long>(g_active.load()), 0);
+    return get_stage(u, gid, 0);
 }
 uint32_t upgrades_active_garage() { return g_active.load(); }
 
