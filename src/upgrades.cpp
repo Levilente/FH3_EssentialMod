@@ -452,6 +452,29 @@ int detour_memcmp(const void* x, const void* y, size_t n) {
     return g_orig_memcmp(x, y, n);
 }
 
+// The game's part setter (0x36B7A0: enum, part id, ..., part set, change list) stores the part at set + 8 + 4*enum
+// without a bounds check. The part set is 0xB4 bytes (enum 43 lives at +4, 0..42 at +8) and the car's tuning setup
+// follows it directly, so a part of enum 47+ written there overwrote tuning values: NitroSystem's kit (enum 47) hit
+// the brake balance and the spacers (48/49) took the handbrake away until the next start. Our slots live in
+// platform-upgrades.ini, so the game never needs them in its part set: such a call is dropped.
+typedef void (*PartSetFn)(int, int, int, int, void*, void*);
+PartSetFn g_orig_partset = nullptr;
+std::atomic<int> g_partset_logged{0};
+void detour_partset(int e, int part, int c, int d, void* set, void* changes) {
+    if (e > 43) {
+        if (g_partset_logged.fetch_add(1) < 40) {
+            const uintptr_t ret = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+            const uintptr_t gb  = reinterpret_cast<uintptr_t>(game());
+            char buf[160];
+            snprintf(buf, sizeof buf, "upgrades: kept part %d (enum %d) out of the game's part set (caller game+0x%llX)", part, e,
+                     static_cast<unsigned long long>(gb && ret > gb ? ret - gb : 0));
+            plog(buf);
+        }
+        return;
+    }
+    g_orig_partset(e, part, c, d, set, changes);
+}
+
 // Leaving the shop asks "buy the basket?" only when the car's part set (slots 0..42) differs from the previewed one.
 int detour_diff(const void* a, const void* b) {
     const int r = g_orig_diff(a, b);
@@ -607,6 +630,7 @@ void install_hooks() {
         {0x1802D82, reinterpret_cast<void*>(detour_memcmp), "upgrades: memcmp thunk", reinterpret_cast<void**>(&g_orig_memcmp)},
         {0x37E980, reinterpret_cast<void*>(detour_qa), "upgrades: query builder A", reinterpret_cast<void**>(&g_orig_qa)},
         {0x410750, reinterpret_cast<void*>(detour_qb), "upgrades: query builder B", reinterpret_cast<void**>(&g_orig_qb)},
+        {0x36B7A0, reinterpret_cast<void*>(detour_partset), "upgrades: part setter", reinterpret_cast<void**>(&g_orig_partset)},
     };
     for (const H& h : hooks) hook_game_function(h.rva, h.detour, h.what, h.orig);
     install_basket_patch(reinterpret_cast<uintptr_t>(find_game()));

@@ -107,6 +107,23 @@ uint32_t wanted_id(bool power, int choice) {
     return choice == 1 ? U_KMH : U_MPH;
 }
 
+// SEH lives in these two, which hold no C++ objects (clang refuses __try where objects need unwinding).
+uint32_t read_u32(const uint8_t* p) {
+    __try {
+        return *reinterpret_cast<const uint32_t*>(p);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0xFFFFFFFFu;
+    }
+}
+void put_row(uint8_t* r, uint32_t id, uint32_t fmt, uint32_t label) {
+    __try {
+        if (*reinterpret_cast<uint32_t*>(r + 4) != id) *reinterpret_cast<uint32_t*>(r + 4) = id;
+        if (*reinterpret_cast<uint32_t*>(r + 8) != fmt) *reinterpret_cast<uint32_t*>(r + 8) = fmt;
+        if (*reinterpret_cast<uint32_t*>(r + 0x10) != label) *reinterpret_cast<uint32_t*>(r + 0x10) = label;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
 void write_rows(uint8_t* t) {
     std::vector<Snap> snap;
     {
@@ -125,14 +142,9 @@ void write_rows(uint8_t* t) {
             if (!pw && !is_speed(s.id)) continue;
             const Snap& use = donor ? *donor : s;
             uint8_t* r      = row(t, s.sys, s.kind);
-            __try {
-                if (*reinterpret_cast<uint32_t*>(r + 4) != use.id)
-                    log_line("units", "sys " + std::to_string(s.sys) + " kind " + std::to_string(s.kind) + ": " + std::to_string(s.id) + " -> " + std::to_string(use.id));
-                if (*reinterpret_cast<uint32_t*>(r + 4) != use.id) *reinterpret_cast<uint32_t*>(r + 4) = use.id;
-                if (*reinterpret_cast<uint32_t*>(r + 8) != use.fmt) *reinterpret_cast<uint32_t*>(r + 8) = use.fmt;
-                if (*reinterpret_cast<uint32_t*>(r + 0x10) != use.label) *reinterpret_cast<uint32_t*>(r + 0x10) = use.label;
-            } __except (EXCEPTION_EXECUTE_HANDLER) {
-            }
+            if (read_u32(r + 4) != use.id)
+                log_line("units", "sys " + std::to_string(s.sys) + " kind " + std::to_string(s.kind) + ": " + std::to_string(s.id) + " -> " + std::to_string(use.id));
+            put_row(r, use.id, use.fmt, use.label);
         }
     }
 }
