@@ -1211,6 +1211,24 @@ uint64_t detour_hud(void* c, void* a, void* b, void* d) {
     char* spec = *reinterpret_cast<char**>(car + 0x110);
     if (!spec || !readable(spec + 0x30, 4)) return r;
     probe_hud_car(car, spec);
+    {   // PROBE 3: does a change of the loader's spec inside the Car (+0x140) after the car is built reach the car?
+        // 12 s after the player's Car is first seen, its track (spec +0xF4 / +0xF8) gets 15 cm wider, once.
+        static char* seen_car = nullptr;
+        static uint64_t seen_at = 0;
+        static char* done_car = nullptr;
+        if (car != seen_car) { seen_car = car; seen_at = now; }
+        if (done_car != car && now - seen_at > 12000 && readable(car + 0x140 + 0xF8, 4)) {
+            done_car = car;
+            float* f = reinterpret_cast<float*>(car + 0x140 + 0xF4);
+            float* rr = reinterpret_cast<float*>(car + 0x140 + 0xF8);
+            const float bf = *f, br = *rr;
+            *f += 0.15f;
+            *rr += 0.15f;
+            char line[200];
+            snprintf(line, sizeof line, "PROBE 3: the player's Car %p: track in its spec (+0x140) %.3f/%.3f -> %.3f/%.3f (15 cm wider, live)", car, bf, br, *f, *rr);
+            plog(line);
+        }
+    }
     driven_car_seen(*reinterpret_cast<int32_t*>(spec + 0x30));
     return r;
 }
