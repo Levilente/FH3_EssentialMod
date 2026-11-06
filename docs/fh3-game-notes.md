@@ -265,3 +265,15 @@ add rows, the shop's add / differ / commit / abandon steps (`0x16FAEF0`, `0x19CD
 thunk (`0x1802D82`), and patches the basket check (`0x16FB341`). Purchases call the credits functions above plus the purchased-parts row writer
 `0x36BDA0` and the garage-id getter `0x37AA10`. The game forgets a part when another one of the same type is fitted, so the owned stages are written
 back to `Profile0_Career_PurchasedParts` whenever the shop asks about them.
+
+## Track width (found 6 Nov, read from the exe and gamedbRC.slt, not yet run in the game)
+
+- The database has `CarTrackOffsets(Id, FrontOffset, RearOffset, UpgradeFrontOffset, UpgradeRearOffset)`: 86 rows, `Id` is the car model
+  id (`Data_Car.Id`), values in metres (e.g. -0.043 to 0.025). `Data_CarBody` has `ModelFrontTrackOuter` / `ModelRearTrackOuter`.
+  `WheelNormOffsets(Id, NormOffset)` is looked up by the stock wheel id.
+- The car data builder is `0x189F020` (`rcx` = the car data object, `rdx` = the `Data_Car` row reader; one caller, `0x189A225`). The car's model
+  id is `*(int*)(*(char**)(this + 0x110) + 0x30)`. It stores, as floats: `+0x7734` front tire width (mm to m), `+0x773C` FrontOffset,
+  `+0x7740` RearOffset, `+0x7744` UpgradeFrontOffset, `+0x7748` UpgradeRearOffset (a car with no row gets 0). `0x189F8B8`
+  (`mov rcx, [rdi+0x71E8]`) is right after the four stores.
+- No instruction reads `+0x773C..+0x7748` directly, so how the physics and the model use them is not known yet; which pair applies with
+  stock or aftermarket wheels is not verified. The Universal Wheel Spacers mod adds its width to all four at `0x189F8B8`.
