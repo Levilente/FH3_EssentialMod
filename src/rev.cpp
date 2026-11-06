@@ -39,6 +39,13 @@ std::atomic<uint64_t> g_calls{0};
 std::atomic<uint64_t> g_pad_tick{0};
 std::atomic<float> g_rt{0.0f};
 
+bool readable(const void* p, std::size_t n) {
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (VirtualQuery(p, &mbi, sizeof mbi) != sizeof mbi || mbi.State != MEM_COMMIT) return false;
+    if (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) return false;
+    return static_cast<const char*>(p) + n <= static_cast<const char*>(mbi.BaseAddress) + mbi.RegionSize;
+}
+
 float trigger() {
     const uint64_t now = GetTickCount64();
     if (now - g_pad_tick.load() >= 8) {
@@ -56,8 +63,74 @@ float trigger() {
     return g_rt.load();
 }
 
+
+// ---- Probe: why does the garage car run no engine step? Snapshots of a driven car and of the garage car, compared ----
+// The driven car is the one the engine torque hook sees with the trigger held (shop idle for 20 s); the garage car is any
+// car whose tick (Release, slot 3 of the car's second vtable) runs while the shop is in use. Dwords that are small in both
+// (flags, states, counts) and differ are logged once.
+constexpr uintptr_t kCarVtable2 = 0x4682608;
+constexpr int kCarSecondary = 0x4B0, kSnap = 0x5000;
+unsigned char g_drv[kSnap], g_gar[3][kSnap];
+void* g_gar_car[3] = {nullptr, nullptr, nullptr};
+std::atomic<bool> g_have_drv{false}, g_diffed{false};
+std::atomic<int> g_n_gar{0};
+std::atomic<void*> g_drv_car{nullptr};
+std::atomic<int> g_probe{1};
+using RelFn = uint64_t (*)(void*);
+RelFn g_orig_rel = nullptr;
+
+void log_diff() {
+    if (g_diffed.exchange(true)) return;
+    for (int k = 0; k < g_n_gar.load(); ++k) {
+        std::string out = "rev probe: garage car " + std::to_string(k) + " vs driven car, small dwords that differ (offset garage->driven):";
+        int n = 0;
+        for (int o = 0; o + 4 <= kSnap && n < 160; o += 4) {
+            uint32_t a, b;
+            memcpy(&a, g_gar[k] + o, 4);
+            memcpy(&b, g_drv + o, 4);
+            if (a == b || a > 16 || b > 16) continue;
+            char t[40];
+            snprintf(t, sizeof t, " +0x%X(%u->%u)", o, a, b);
+            out += t;
+            ++n;
+        }
+        plog(out);
+    }
+}
+
+uint64_t detour_rel(void* self) {
+    char* car = static_cast<char*>(self) - kCarSecondary;
+    const uint64_t shop = upgrades_shop_tick();
+    if (g_probe.load() && shop && GetTickCount64() - shop < 2500 && g_n_gar.load() < 3) {
+        bool known = false;
+        for (int k = 0; k < g_n_gar.load(); ++k) known |= g_gar_car[k] == car;
+        if (!known && car != g_drv_car.load() && readable(car, kSnap)) {
+            const int k = g_n_gar.load();
+            memcpy(g_gar[k], car, kSnap);
+            g_gar_car[k] = car;
+            g_n_gar.store(k + 1);
+            char b[120];
+            snprintf(b, sizeof b, "rev probe: garage car %d is %p (seen ticking while the shop is in use)", k, static_cast<void*>(car));
+            plog(b);
+        }
+    }
+    if (g_have_drv.load() && g_n_gar.load() > 0) log_diff();
+    return g_orig_rel(self);
+}
+
 bool detour_torque(void* self, float rpm, float throttle, void* r8, void* r9, uint64_t a5, uint64_t a6, uint64_t a7, uint64_t a8) {
     g_calls.fetch_add(1);
+    if (g_probe.load() && !g_have_drv.load()) {
+        const uint64_t shop = upgrades_shop_tick();
+        if (throttle > 0.8f && trigger() > 0.8f && (!shop || GetTickCount64() - shop > 20000) && readable(self, kSnap)) {
+            memcpy(g_drv, self, kSnap);
+            g_drv_car.store(self);
+            g_have_drv.store(true);
+            char b[120];
+            snprintf(b, sizeof b, "rev probe: driven car is %p (trigger held, shop idle)", self);
+            plog(b);
+        }
+    }
     if (g_enabled.load() && GetTickCount64() - upgrades_shop_tick() < kShopMs && upgrades_shop_tick()) {
         const float rt = trigger();
         if (rt > throttle) {
@@ -80,26 +153,27 @@ void rev_start() {
     if (done.exchange(true)) return;
     const std::wstring ini = (azimuth_dir() / L"fh3-mods" / L"platform-rev.ini").wstring();
     g_enabled = static_cast<int>(GetPrivateProfileIntW(L"rev", L"Enabled", 0, ini.c_str()));
-    if (!g_enabled.load()) return;
-    std::thread([] {   // diagnostics: while RT is held, say what the hook sees
-        uint64_t last = 0;
-        int n = 0;
-        for (;;) {
-            Sleep(1000);
-            if (n >= 40) return;
-            const float rt = trigger();
-            const uint64_t c = g_calls.load();
-            if (rt < 0.3f) { last = c; continue; }
-            const uint64_t t = upgrades_shop_tick(), now = GetTickCount64();
-            char b[200];
-            snprintf(b, sizeof b, "rev: RT %.2f held; torque calls in the last second %llu; shop touched the car %lld ms ago",
-                     static_cast<double>(rt), static_cast<unsigned long long>(c - last), t ? static_cast<long long>(now - t) : -1LL);
-            plog(b);
-            last = c;
-            ++n;
+    g_probe = static_cast<int>(GetPrivateProfileIntW(L"rev", L"Probe", 1, ini.c_str()));
+    if (!g_enabled.load() && !g_probe.load()) return;
+    std::thread([] {
+        char* base = nullptr;
+        for (int i = 0; i < 2400 && !base; ++i) {   // the game maps late; wait until the car vtable has its entries
+            base = static_cast<char*>(find_game());
+            if (base && !(readable(base + kCarVtable2, 64) && *reinterpret_cast<void**>(base + kCarVtable2 + 24))) base = nullptr;
+            if (!base) Sleep(250);
         }
+        if (base && g_probe.load()) {
+            void** slot = reinterpret_cast<void**>(base + kCarVtable2) + 3;   // Release, the end of the car's tick
+            DWORD old = 0;
+            if (VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &old)) {
+                g_orig_rel = reinterpret_cast<RelFn>(*slot);
+                *slot = reinterpret_cast<void*>(&detour_rel);
+                VirtualProtect(slot, sizeof(void*), old, &old);
+                plog("rev probe: watching the car tick");
+            }
+        }
+        hook_game_function(RVA_TORQUE, reinterpret_cast<void*>(detour_torque), "rev: engine torque", reinterpret_cast<void**>(&g_orig));
     }).detach();
-    hook_game_function(RVA_TORQUE, reinterpret_cast<void*>(detour_torque), "rev: engine torque", reinterpret_cast<void**>(&g_orig));
 }
 
 } // namespace fh3platform
