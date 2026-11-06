@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.2
+
+- **Upgrade bridge: shop preview.** While a stage of a bridge upgrade is looked at in the shop, `upgrade_stage` returns that stage for the car (the game's "show this part" step, `game+0x38D0B0`, is hooked), and the shop rebuilds the car as it does for its own parts. A mod that builds the car from `upgrade_stage` shows the stage on hover. The preview ends with the purchase, when the shop is left without buying, or when another car is driven.
+
 ## 1.0.1
 
 - **Upgrade bridge: tuning no longer gets overwritten.** The game's part setter (`game+0x36B7A0`) stores a part at `part set + 8 + 4*enum` with no bounds check, and the car's tuning setup sits right after the 0xB4-byte part set. Choosing a stage of a bridge upgrade (enum 47+) in the shop wrote its part id into the tuning: the Nitrous Kit (enum 47) could move the brake balance all the way to the rear, and Universal Wheel Spacers (48/49) took the handbrake away until the next start. The platform now keeps parts of enum 44+ out of the game's part set (the bridge keeps them in `platform-upgrades.ini`) and logs the first such calls.

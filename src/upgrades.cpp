@@ -46,6 +46,8 @@ struct Upgrade {
     void* user           = nullptr;
     std::atomic<long> pend_id{0};   // the stage chosen in the shop and not yet installed
     std::atomic<bool> pend{false};
+    std::atomic<int> preview{-1};       // the stage the shop shows on the car right now (-1: none), for upgrade_stage
+    std::atomic<long> preview_gid{0};
     int penum() const { return kFirstEnum + slot; }
     long part(int stage) const { return kPartBase + 10L * slot + stage; }
     int count() const { return static_cast<int>(stages.size()); }
@@ -156,8 +158,14 @@ void set_stage(const Upgrade* u, long gid, long ord, int stage) {
     if (gid == static_cast<long>(g_active.load())) notify(u, gid, stage);
 }
 
+void clear_previews() {
+    const int n = g_count.load();
+    for (int i = 0; i < n; ++i) g_up[i]->preview.store(-1);
+}
+
 void activate(unsigned gid) {
     if (gid == 0 || gid >= 2000000000u || gid == g_active.load()) return;
+    clear_previews();
     g_active.store(gid);
     WritePrivateProfileStringW(L"general", L"LastGarage", wnum(gid).c_str(), ini_path().c_str());
     const int n = g_count.load();
@@ -452,6 +460,29 @@ int detour_memcmp(const void* x, const void* y, size_t n) {
     return g_orig_memcmp(x, y, n);
 }
 
+// The shop's "show this part on the car" step (0x38D0B0: car, enum, part id, ..., refresh flag). It puts the part in
+// the car's part set (our enums are kept out of it by the part setter below) and, with the refresh flag (the shop's
+// preview), rebuilds the car. For a stage of ours it records that stage as the preview, so upgrade_stage answers
+// with it while the car is rebuilt: a mod that builds the car from upgrade_stage then shows the stage on hover.
+QueryBuildB g_orig_show = nullptr;
+std::atomic<int> g_show_logged{0};
+void* detour_show(uint64_t car, uint64_t e, uint64_t part, uint64_t d, uint64_t flag, uint64_t g, uint64_t h, uint64_t i, uint64_t j) {
+    if (static_cast<int>(e) > 43) {
+        int st = 0;
+        Upgrade* u = by_part(static_cast<long>(static_cast<int>(part)), &st);
+        if (u && u->penum() == static_cast<int>(e)) {
+            const bool shop = (flag & 0xFF) != 0;
+            if (shop) {
+                u->preview_gid.store(static_cast<long>(g_active.load()));
+                u->preview.store(st);
+            }
+            if (g_show_logged.fetch_add(1) < 40)
+                plog("upgrades: " + u->id + " stage " + std::to_string(st) + (shop ? " shown in the shop (preview)" : " set on the car"));
+        }
+    }
+    return g_orig_show(car, e, part, d, flag, g, h, i, j);
+}
+
 // The game's part setter (0x36B7A0: enum, part id, ..., part set, change list) stores the part at set + 8 + 4*enum
 // without a bounds check. The part set is 0xB4 bytes (enum 43 lives at +4, 0..42 at +8) and the car's tuning setup
 // follows it directly, so a part of enum 47+ written there overwrote tuning values: NitroSystem's kit (enum 47) hit
@@ -598,12 +629,14 @@ void* detour_commit(ARGS12) {
             }
         }
     }
+    clear_previews();
     return g_orig_commit(PASS12);
 }
 
 void* detour_abandon(ARGS12) {
     const int n = g_count.load();
     for (int q = 0; q < n; ++q) g_up[q]->pend.store(false);
+    clear_previews();
     return g_orig_abandon(PASS12);
 }
 
@@ -631,6 +664,7 @@ void install_hooks() {
         {0x37E980, reinterpret_cast<void*>(detour_qa), "upgrades: query builder A", reinterpret_cast<void**>(&g_orig_qa)},
         {0x410750, reinterpret_cast<void*>(detour_qb), "upgrades: query builder B", reinterpret_cast<void**>(&g_orig_qb)},
         {0x36B7A0, reinterpret_cast<void*>(detour_partset), "upgrades: part setter", reinterpret_cast<void**>(&g_orig_partset)},
+        {0x38D0B0, reinterpret_cast<void*>(detour_show), "upgrades: show part on car", reinterpret_cast<void**>(&g_orig_show)},
     };
     for (const H& h : hooks) hook_game_function(h.rva, h.detour, h.what, h.orig);
     install_basket_patch(reinterpret_cast<uintptr_t>(find_game()));
@@ -749,6 +783,9 @@ static Upgrade* handle_upgrade(int h) {
 int upgrades_stage(int handle, int32_t garage) {
     Upgrade* u = handle_upgrade(handle);
     if (!u) return 0;
+    const long gid = garage > 0 ? garage : static_cast<long>(g_active.load());
+    // In the shop, the stage being looked at, so a mod can show it on the car before it is bought.
+    if (const int pv = u->preview.load(); pv >= 0 && pv < u->count() && u->preview_gid.load() == gid) return pv;
     return get_stage(u, garage > 0 ? garage : static_cast<long>(g_active.load()), 0);
 }
 uint32_t upgrades_active_garage() { return g_active.load(); }
