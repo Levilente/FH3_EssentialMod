@@ -163,9 +163,10 @@ void clear_previews() {
     for (int i = 0; i < n; ++i) g_up[i]->preview.store(-1);
 }
 
-void activate(unsigned gid) {
+void activate(unsigned gid, const char* why = "") {
     if (gid == 0 || gid >= 2000000000u || gid == g_active.load()) return;
     clear_previews();
+    plog("upgrades: driven car is garage " + std::to_string(gid) + " (was " + std::to_string(g_active.load()) + ", " + why + ")");
     g_active.store(gid);
     WritePrivateProfileStringW(L"general", L"LastGarage", wnum(gid).c_str(), ini_path().c_str());
     const int n = g_count.load();
@@ -360,7 +361,7 @@ bool rewrite(const char* z, size_t len, std::string& out) {
         u->pend.store(false);
         if (gid > 0) {
             set_stage(u, gid, g_cur_ord.load(), st);
-            activate(static_cast<unsigned>(gid));
+            activate(static_cast<unsigned>(gid), "stage installed");
         }
         // The game writes its whole idea of the car's parts (our id in the column and whatever it clears because of it).
         // An upgrade of ours is no engine part: nothing of that may reach the car; only the stage is kept, above.
@@ -383,7 +384,7 @@ int detour_prepare(void* db, const char* z, int n, unsigned fl, void* old, void*
         const size_t len = n < 0 ? strlen(z) : static_cast<size_t>(n);
         if (len > 24 && z[0] == 'U' && strncmp(z, "UPDATE Profile0_Career_Garage SET TopSpeed", 42) == 0) {
             const char* w = strstr(z, " WHERE Id=");   // the driven car's stats are saved: that is its garage id
-            if (w) activate(static_cast<unsigned>(atol(w + 10)));
+            if (w) activate(static_cast<unsigned>(atol(w + 10)), "car stats saved");
         }
         if (len > 60 && z[0] == 'S' && !t_in_repair && starts(z, len, "SELECT 1 From Profile0_Career_PurchasedParts WHERE GarageId = ")) {
             long e = 0;
@@ -402,7 +403,7 @@ int detour_prepare(void* db, const char* z, int n, unsigned fl, void* old, void*
         if (!t_in_repair && rewrite(z, len, q)) {
             if (z[0] == 'U' || z[0] == 'S') {
                 const char* g = strstr(z, "GarageId = ");
-                if (z[0] == 'S' && g) activate(static_cast<unsigned>(atol(g + 11)));
+                if (z[0] == 'S' && g) activate(static_cast<unsigned>(atol(g + 11)), "query on that garage id");
             }
             const int r = g_orig_prepare(db, q.c_str(), -1, fl, old, pp, tail);
             if (tail && readable(tail, sizeof *tail)) *tail = z + len;   // some callers (sqlite3_exec chain) pass a non-pointer here
@@ -657,7 +658,7 @@ void* detour_commit(ARGS12) {
         } else if (sess && st > 0) {
             if (buy_guarded(sess, gid, u, st)) {
                 set_stage(u, gid, g_cur_ord.load(), st);
-                activate(static_cast<unsigned>(gid));
+                activate(static_cast<unsigned>(gid), "purchase");
             }
         }
     }
@@ -703,7 +704,7 @@ void install_hooks() {
     install_basket_patch(reinterpret_cast<uintptr_t>(find_game()));
     // seed the car being driven from the last session, until the game's statements say which it is
     const unsigned last = GetPrivateProfileIntW(L"general", L"LastGarage", 0, ini_path().c_str());
-    if (last) activate(last);
+    if (last) activate(last, "last session");
     plog("upgrades: " + std::to_string(g_count.load()) + " custom upgrade(s) hooked into the shop");
 }
 
