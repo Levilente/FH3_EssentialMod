@@ -1109,10 +1109,19 @@ void driven_car_seen(int32_t car_id) {
 // player's Car / spec from the HUD, to learn how the game builds the player's car and an AI car of the same model.
 Fn12 g_orig_loader = nullptr;
 std::atomic<int> g_probe_lines{0};
+struct ProbeBuild { char* spec; int car; int seq; };
+ProbeBuild g_probe_ring[128] = {};
+std::atomic<int> g_probe_seq{0};
+std::mutex g_probe_mu;
 void* detour_loader(ARGS12) {
     void* bt[8] = {};
     const USHORT nf = RtlCaptureStackBackTrace(1, 8, bt, nullptr);
     void* r = g_orig_loader(PASS12);
+    {
+        const int sq = g_probe_seq.fetch_add(1) + 1;
+        std::scoped_lock lk{g_probe_mu};
+        g_probe_ring[sq % 128] = {reinterpret_cast<char*>(a), (c && readable(reinterpret_cast<void*>(c), 4)) ? *reinterpret_cast<int*>(c) : 0, sq};
+    }
     if (g_probe_lines.fetch_add(1) < 400) {
         char* spec = reinterpret_cast<char*>(a);
         int id = 0;
@@ -1130,7 +1139,7 @@ void* detour_loader(ARGS12) {
             chain += b;
         }
         char line[400];
-        snprintf(line, sizeof line, "PROBE build: car %d (spec id %d), spec %p, track %.3f/%.3f, thread %lu, d=%llX, active garage %u%s, callers%s", id, sid, spec, tf, tr,
+        snprintf(line, sizeof line, "PROBE build #%d: car %d (spec id %d), spec %p, track %.3f/%.3f, thread %lu, d=%llX, active garage %u%s, callers%s", g_probe_seq.load(), id, sid, spec, tf, tr,
                  GetCurrentThreadId(), (unsigned long long)d, g_active.load(), g_foreign.load() ? " (foreign)" : "", chain.c_str());
         plog(line);
     }
@@ -1148,6 +1157,45 @@ void probe_hud_car(char* car, char* spec) {
     char line[200];
     snprintf(line, sizeof line, "PROBE player's Car %p, spec %p (id %d, track %.3f/%.3f)", car, spec, sid, tf, tr);
     plog(line);
+    // Which of the loader's specs does the player's Car lead to? Pointers in the Car (0x1800 bytes) and one level below.
+    ProbeBuild ring[128];
+    {
+        std::scoped_lock lk{g_probe_mu};
+        memcpy(ring, g_probe_ring, sizeof ring);
+    }
+    auto match = [&](uintptr_t v) -> const ProbeBuild* {
+        if (!v) return nullptr;
+        for (const ProbeBuild& b : ring)
+            if (b.spec && v >= reinterpret_cast<uintptr_t>(b.spec) && v < reinterpret_cast<uintptr_t>(b.spec) + 0x200) return &b;
+        return nullptr;
+    };
+    int found = 0;
+    for (size_t o = 0; o < 0x1800 && found < 12; o += 8) {
+        if (!readable(car + o, 8)) break;
+        const uintptr_t v = *reinterpret_cast<uintptr_t*>(car + o);
+        if (const ProbeBuild* b = match(v)) {
+            snprintf(line, sizeof line, "PROBE   Car+0x%zX -> build #%d (car %d) spec %p +0x%llX", o, b->seq, b->car, b->spec, (unsigned long long)(v - reinterpret_cast<uintptr_t>(b->spec)));
+            plog(line);
+            ++found;
+            continue;
+        }
+        if (v < 0x10000 || (v & 7) || !readable(reinterpret_cast<void*>(v), 0x400)) continue;
+        for (size_t p2 = 0; p2 < 0x400 && found < 12; p2 += 8) {
+            const uintptr_t w = *reinterpret_cast<uintptr_t*>(v + p2);
+            if (const ProbeBuild* b = match(w)) {
+                snprintf(line, sizeof line, "PROBE   [Car+0x%zX]+0x%zX -> build #%d (car %d) spec %p +0x%llX", o, p2, b->seq, b->car, b->spec, (unsigned long long)(w - reinterpret_cast<uintptr_t>(b->spec)));
+                plog(line);
+                ++found;
+            }
+        }
+    }
+    // the specs of the player's model still alive: their track now
+    for (const ProbeBuild& b : ring)
+        if (b.spec && b.car > 0 && sid > 0 && b.car == (sid >= 100000 ? sid / 1000 : sid) && readable(b.spec + 0xF8, 4)) {
+            snprintf(line, sizeof line, "PROBE   build #%d spec %p: track now %.3f/%.3f", b.seq, b.spec, *reinterpret_cast<float*>(b.spec + 0xF4), *reinterpret_cast<float*>(b.spec + 0xF8));
+            plog(line);
+        }
+    if (!found) plog("PROBE   no pointer from the Car to a recent spec");
 }
 
 uint64_t detour_hud(void* c, void* a, void* b, void* d) {
