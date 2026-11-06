@@ -82,6 +82,24 @@ std::atomic<int> g_probe{0};
 using RelFn = uint64_t (*)(void*);
 RelFn g_orig_rel = nullptr;
 
+
+// Cars seen ticking lately (any time), so the experiment can reach the shown car whatever moment it ticks.
+struct Seen { char* car; uint64_t ms; };
+Seen g_seen[48];
+void note_car(char* car) {
+    const uint64_t now = GetTickCount64();
+    int free_i = -1;
+    for (int i = 0; i < 48; ++i) {
+        if (g_seen[i].car == car) { g_seen[i].ms = now; return; }
+        if (free_i < 0 && (!g_seen[i].car || now - g_seen[i].ms > 5000)) free_i = i;
+    }
+    if (free_i >= 0) g_seen[free_i] = {car, now};
+}
+bool looks_like_car(char* c, char* base) {   // both vtables of the car object, so a freed block doesn't pass
+    return readable(c, kSnap) && *reinterpret_cast<char**>(c) == base + 0x4682578 && *reinterpret_cast<char**>(c + kCarSecondary) == base + kCarVtable2;
+}
+char* g_base = nullptr;
+
 void log_diff() {
     if (g_diffed.exchange(true)) return;
     for (int k = 0; k < g_n_snap.load(); ++k) {
@@ -120,7 +138,7 @@ uint32_t g_saved[3][16];
 std::atomic<uint64_t> g_gcalls{0};
 std::atomic<float> g_gpeak{0.0f};
 uint64_t g_exp_calls0 = 0;
-constexpr int kMaxExp = 8;
+constexpr int kMaxExp = 24;
 char* g_exp_cars[kMaxExp];
 int g_exp_n = 0;
 bool is_live(const void* c) { for (int k = 0; k < g_exp_n; ++k) if (g_exp_cars[k] == c) return true; return false; }   // a car the experiment is on
@@ -155,6 +173,9 @@ void exp_step(bool in_garage) {
         g_gcalls = 0;
         g_gpeak = 0.0f;
         for (int k = 0; k < g_n_gar.load(); ++k) exp_apply(static_cast<char*>(g_gar_car[k]));
+        const uint64_t now = GetTickCount64();
+        for (int i = 0; i < 48; ++i)
+            if (g_seen[i].car && now - g_seen[i].ms < 5000 && g_base && looks_like_car(g_seen[i].car, g_base)) exp_apply(g_seen[i].car);
         char b[160];
         snprintf(b, sizeof b, "rev probe: press %d: experiment %d (%s) applied to %d car(s)", g_exp + 1, g_exp % kNExp, e.name, g_exp_n);
         plog(b);
@@ -176,6 +197,7 @@ bool not_driving() { return GetTickCount64() - g_last_torque_ms.load() > 1500; }
 
 uint64_t detour_rel(void* self) {
     char* car = static_cast<char*>(self) - kCarSecondary;
+    note_car(car);
     const uint64_t shop = upgrades_shop_tick();
     if (!g_exp_on && g_n_gar.load() > 0 && !not_driving()) g_n_gar.store(0);   // the garage cars are gone: no stale pointers
     if (g_probe.load() && g_last_torque_ms.load() && not_driving() && g_n_gar.load() < 3) {
@@ -258,6 +280,7 @@ void rev_start() {
             if (base && !(readable(base + kCarVtable2, 64) && *reinterpret_cast<void**>(base + kCarVtable2 + 24))) base = nullptr;
             if (!base) Sleep(250);
         }
+        g_base = base;
         if (base && g_probe.load()) {
             void** slot = reinterpret_cast<void**>(base + kCarVtable2) + 3;   // Release, the end of the car's tick
             DWORD old = 0;
