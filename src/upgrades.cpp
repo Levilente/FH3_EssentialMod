@@ -41,6 +41,7 @@ struct Upgrade {
     int slot = 0;
     std::wstring name, desc;
     int area = 1;
+    int camera_part = 0;   // a game part enum whose shop camera this upgrade uses (0 = default)
     std::string icon, icon_lg;
     std::vector<Stage> stages;
     FH3UpgradeStageFn cb = nullptr;
@@ -545,6 +546,23 @@ void* detour_setup(uint64_t car, uint64_t set, uint64_t c, uint64_t d, uint64_t 
     return g_orig_setup(car, set, c, d, e, f, g, h, i);
 }
 
+// The shop's camera for a part list (0x16F7ED0: this, edx = upgrade area, r8d = part enum) builds the camera preset's
+// name ("Upgrades_WheelStyle_Front" ...) from the enum; an enum of ours has none (and the name lookup 0x19D67B0 reads past
+// its table). An upgrade that asks for the camera of a game part gets that part's enum here.
+QueryBuildB g_orig_camera = nullptr;
+void* detour_camera(uint64_t self, uint64_t area, uint64_t e, uint64_t d, uint64_t f, uint64_t g, uint64_t h, uint64_t i, uint64_t j) {
+    const int en = static_cast<int>(e);
+    if (en > 43) {
+        const int n = g_count.load();
+        for (int q = 0; q < n; ++q)
+            if (g_up[q]->penum() == en && g_up[q]->camera_part > 0) {
+                e = static_cast<uint32_t>(g_up[q]->camera_part);
+                break;
+            }
+    }
+    return g_orig_camera(self, area, e, d, f, g, h, i, j);
+}
+
 // The game's part setter (0x36B7A0: enum, part id, ..., part set, change list) stores the part at set + 8 + 4*enum
 // without a bounds check. The part set is 0xB4 bytes (enum 43 lives at +4, 0..42 at +8) and the car's tuning setup
 // follows it directly, so a part of enum 47+ written there overwrote tuning values: NitroSystem's kit (enum 47) hit
@@ -784,6 +802,7 @@ void install_hooks() {
         {0x38D0B0, reinterpret_cast<void*>(detour_show), "upgrades: show part on car", reinterpret_cast<void**>(&g_orig_show)},
         {0x3939F0, reinterpret_cast<void*>(detour_rebuild), "upgrades: car rebuild (log)", reinterpret_cast<void**>(&g_orig_rebuild)},
         {0x38BCD0, reinterpret_cast<void*>(detour_setup), "upgrades: setup on the shop car", reinterpret_cast<void**>(&g_orig_setup)},
+        {0x16F7ED0, reinterpret_cast<void*>(detour_camera), "upgrades: shop camera for a part", reinterpret_cast<void**>(&g_orig_camera)},
     };
     for (const H& h : hooks) hook_game_function(h.rva, h.detour, h.what, h.orig);
     install_basket_patch(reinterpret_cast<uintptr_t>(find_game()));
@@ -826,7 +845,7 @@ int slot_for(const std::string& id, int preferred) {
 
 int upgrades_register(FH3Mod* mod, const FH3UpgradeDef* d, const std::function<void(const char*, uint32_t, const wchar_t*)>& add_key,
                       const std::function<void(const std::string&)>& add_sql) {
-    if (!mod || !d || d->size < sizeof(FH3UpgradeDef) || !d->id || !*d->id || !d->name || !d->stages || d->stage_count < 2 || d->stage_count > kMaxStages) {
+    if (!mod || !d || d->size < FH3_UPGRADEDEF_SIZE_V11 || !d->id || !*d->id || !d->name || !d->stages || d->stage_count < 2 || d->stage_count > kMaxStages) {
         plog("register_upgrade: bad definition");
         return -1;
     }
@@ -864,6 +883,7 @@ int upgrades_register(FH3Mod* mod, const FH3UpgradeDef* d, const std::function<v
     u->desc  = d->description ? d->description : L"";
     u->area  = d->area > 0 ? d->area : 1;
     u->icon  = d->icon ? d->icon : "";
+    u->camera_part = d->size >= sizeof(FH3UpgradeDef) && d->camera_part > 0 && d->camera_part <= 43 ? d->camera_part : 0;
     u->icon_lg = d->icon_large ? d->icon_large : "";
     u->cb    = d->on_stage;
     u->user  = d->user;

@@ -12,6 +12,7 @@ First release of the **FH3 Mod Platform**, a fork of Trinculo54's FH2 Mod Platfo
   - the shop's own credit check counts them: not enough Credits gives the game's "You do not have enough Credits" message, and the "install?" prompt shows the whole basket;
   - owned stages (and Stock) go into the basket at 0 CR and replace what was waiting for that slot;
   - shop preview: while the cursor is on a stage, `upgrade_stage` returns it for the car, and a stage in the basket stays on the shop's car until the setup is installed or abandoned;
+  - `camera_part` in the upgrade definition points the shop's camera at a part of the car while the upgrade's list is open (the front or rear wheel for wheel spacers, as for rim size);
   - `upgrade_car_model(garage)` returns the model recorded for a garage car, so a mod can tell when the player sits in another car (a mission loaner);
   - the log says which query switched the driven car, and traces basket, commit and abandon steps.
 - **Speed unit and Power unit** rows under *Units* in Settings > HUD and Gameplay: km/h or mph, horsepower or kilowatts, whatever *Units* is set to.

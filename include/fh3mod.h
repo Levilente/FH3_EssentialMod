@@ -124,7 +124,12 @@ typedef struct FH3UpgradeDef {
     FH3UpgradeStageFn on_stage;   /* may be NULL */
     void* user;
     int32_t preferred_slot;       /* -1 = any; a mod moving its old upgrade over asks for the slot it had (0 = the first) */
+    /* (platform 1.0.0, API 12; may be left out: a definition without it is accepted)
+       the game part whose shop camera this upgrade's list uses, as its part enum: 10 front rims, 11 rear rims,
+       8 tire compound, 38/39 front/rear tire width, ...; 0 = the area's default camera */
+    int32_t camera_part;
 } FH3UpgradeDef;
+#define FH3_UPGRADEDEF_SIZE_V11 ((uint32_t)offsetof(FH3UpgradeDef, camera_part))
 
 typedef struct FH3ModApi {
     uint32_t size;                /* sizeof(FH3ModApi) as the platform knows it */

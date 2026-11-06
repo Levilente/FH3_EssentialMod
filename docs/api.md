@@ -777,6 +777,7 @@ typedef struct FH3UpgradeDef {
     FH3UpgradeStageFn on_stage;  // may be NULL
     void* user;
     int32_t preferred_slot;      // -1 = any; a mod moving an older upgrade over asks for the slot it had
+    int32_t camera_part;         // the game part whose shop camera the list uses (10 front rims, 11 rear rims, ...); 0 = default
 } FH3UpgradeDef;
 
 int      register_upgrade(FH3Mod* mod, const FH3UpgradeDef* def);
@@ -787,6 +788,7 @@ int32_t  upgrade_car_model(int32_t garage);   // API 12
 ```
 
 - `register_upgrade` (call it from `fh3mod_init`) returns a handle (the slot, 0 or more) or -1; the log says why. `size` must be `sizeof(FH3UpgradeDef)`.
+- `camera_part` (API 12, may be left out) points the shop's camera at a part of the car while your upgrade's list is open: give the part enum of a game part that has the camera you want, e.g. `10` (front rim size: the front wheel), `11` (rear rim size: the rear wheel), `8` (tire compound), `38` / `39` (front / rear tire width). 0 keeps the area's default camera. The shop builds the preset's name from the part (`Upgrades_WheelStyle_Front` ...; the presets are in `media\\Camera.zip\\UICarTargetCameraPresets.xml`).
 - `on_stage` is called on the game's thread when the stage on a car becomes known or changes: the player drove another car, or a stage was installed. Keep it short.
 - `upgrade_stage` is the stage fitted on the car with that garage id (0 is stock), or on the car being driven if `garage <= 0`; `upgrade_active_garage` is the garage id of the car being driven (0 until known).
 - `upgrade_car_model` (API 12) returns the model (car ordinal) the platform has recorded for a garage id, or 0 if unknown. A mod that finds the driven car's model itself can compare the two: when they differ the game has put the player in another car (a mission loaner), and the garage car's upgrades do not apply. NitroSystem II uses it to switch off nitro in such cars.
