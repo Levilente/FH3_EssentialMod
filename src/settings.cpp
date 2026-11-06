@@ -2776,6 +2776,25 @@ bool show_popup(void* page) {
     return show_list(page, title, message, labels, 3, g_fn_vt);
 }
 
+// A plain message box with one OK item over `page`: the popup closes by itself, the handler does nothing.
+void fn_call_noop(PopupFn*) {}
+void* g_noop_fn_vt[7] = {reinterpret_cast<void*>(&fn_copy), reinterpret_cast<void*>(&fn_copy), reinterpret_cast<void*>(&fn_call_noop),
+                         reinterpret_cast<void*>(&fn_type), reinterpret_cast<void*>(&fn_delete), reinterpret_cast<void*>(&fn_dtor),
+                         reinterpret_cast<void*>(&fn_get)};
+bool show_message(void* page, const std::wstring& title, const std::wstring& message) {
+    if (!page || !g_base || !g_loc_vt[7]) return false;
+    // the strings are kept for good (a few per game session at most)
+    auto keep = [](const std::wstring& s) {
+        wchar_t* p = static_cast<wchar_t*>(HeapAlloc(GetProcessHeap(), 0, (s.size() + 1) * sizeof(wchar_t)));
+        memcpy(p, s.c_str(), (s.size() + 1) * sizeof(wchar_t));
+        return p;
+    };
+    FakeLocString* t  = loc_string(keep(title));
+    FakeLocString* m  = loc_string(keep(message));
+    FakeLocString* ok = loc_string(L"OK");
+    return show_list(page, t, m, &ok, 1, g_noop_fn_vt);
+}
+
 int chosen_item(void* popup) {
     __try {
         uint8_t* item = reinterpret_cast<PopupSelectedFn>(g_base + RVA_POPUP_SELECTED)(popup);
@@ -4764,6 +4783,8 @@ bool settings_hub_open(int which) {
 }
 
 FH3Mod* settings_owner() { return &g_owner_mod; }
+
+bool show_message_popup(void* page, const std::wstring& title, const std::wstring& message) { return show_message(page, title, message); }
 
 } // namespace fh3platform
 

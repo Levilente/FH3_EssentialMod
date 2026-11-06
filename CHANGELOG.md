@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.5
+
+- **Upgrade bridge: not enough Credits is said.** The game's own affordability check does not count the price of a bridge upgrade, so installing one you couldn't pay for did nothing at all, silently. The platform now shows a message box ("INSUFFICIENT CR!", the price and your Credits) after the commit and leaves the upgrade uninstalled and unpaid. Other parts in the same basket are handled by the game as before.
+
 ## 1.0.4
 
 - API 12: `upgrade_car_model(garage)` returns the model recorded for a garage car, so a mod can tell when the player is in another car than the garage car it believes is driven (mission loaners).

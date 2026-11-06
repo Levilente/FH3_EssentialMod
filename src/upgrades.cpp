@@ -609,6 +609,7 @@ int buy_filter(EXCEPTION_POINTERS* ep) {
     g_fault_at = static_cast<unsigned>(reinterpret_cast<uintptr_t>(ep->ExceptionRecord->ExceptionAddress) - reinterpret_cast<uintptr_t>(game()));
     return EXCEPTION_EXECUTE_HANDLER;
 }
+unsigned g_last_credits = 0;
 int buy_raw(void* sess, int gid, const Upgrade* u, int stage) {
     char* gb   = game();
     void* acct = *reinterpret_cast<void**>(static_cast<char*>(sess) + 8);
@@ -619,12 +620,13 @@ int buy_raw(void* sess, int gid, const Upgrade* u, int stage) {
     const unsigned credits = reinterpret_cast<unsigned (*)(void*)>(gb + 0x1A2FDA0)(v);
     reinterpret_cast<void (*)(void*)>(gb + 0x1A2DFF0)(tmp);
     const long price = u->stages[stage].price;
+    g_last_credits = credits;
     if (credits < static_cast<unsigned>(price)) return -1;
     reinterpret_cast<void (*)(void*, int, int, int, int, int)>(gb + 0x36BDA0)(sess, gid, u->penum(), static_cast<int>(u->part(stage)), -1, static_cast<int>(price));
     reinterpret_cast<void (*)(void*, unsigned, void*)>(gb + 0x337440)(acct, credits - static_cast<unsigned>(price), nullptr);
     return 1;
 }
-bool buy_guarded(void* sess, int gid, const Upgrade* u, int stage) {
+int buy_guarded(void* sess, int gid, const Upgrade* u, int stage) {
     int r = 0;
     __try {
         r = buy_raw(sess, gid, u, stage);
@@ -633,10 +635,12 @@ bool buy_guarded(void* sess, int gid, const Upgrade* u, int stage) {
     }
     plog("upgrades: purchase of " + u->id + " stage " + std::to_string(stage) + " for " + std::to_string(u->stages[stage].price) + ": " +
          (r == 1 ? "paid" : r == -1 ? "not enough credits" : r == -2 ? "no account" : "faulted at game+" + std::to_string(g_fault_at)));
-    return r == 1;
+    return r;
 }
 
 void* detour_commit(ARGS12) {
+    std::wstring short_msg;   // an upgrade of ours that the credits didn't cover: said in a message box after the commit
+    void* short_page = nullptr;
     const int n = g_count.load();
     for (int q = 0; q < n; ++q) {
         Upgrade* u = g_up[q];
@@ -656,14 +660,23 @@ void* detour_commit(ARGS12) {
             set_stage(u, gid, g_cur_ord.load(), st);
             plog("upgrades: " + u->id + " stage " + std::to_string(st) + " fitted (owned, no charge) on garage " + std::to_string(gid));
         } else if (sess && st > 0) {
-            if (buy_guarded(sess, gid, u, st)) {
+            const int r = buy_guarded(sess, gid, u, st);
+            if (r == 1) {
                 set_stage(u, gid, g_cur_ord.load(), st);
                 activate(static_cast<unsigned>(gid), "purchase");
+            } else if (r == -1) {
+                short_page = pg;
+                short_msg  = L"You don't have enough Credits to install " + u->stages[st].name + L" (" + std::to_wstring(u->stages[st].price) +
+                             L" CR, you have " + std::to_wstring(g_last_credits) + L" CR). It was not installed and you were not charged.";
             }
         }
     }
     clear_previews();
-    return g_orig_commit(PASS12);
+    void* res = g_orig_commit(PASS12);
+    if (short_page && !short_msg.empty()) {
+        if (!show_message_popup(short_page, L"INSUFFICIENT CR!", short_msg)) plog("upgrades: the not-enough-credits message box couldn't be shown");
+    }
+    return res;
 }
 
 void* detour_abandon(ARGS12) {
