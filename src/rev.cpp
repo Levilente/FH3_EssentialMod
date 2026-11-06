@@ -113,13 +113,15 @@ const Poke kExp4[] = {{0x4990, 0}, {0x160, 4}, {0x1724, 1}, {0x19FC, 1}, {0x1D88
 struct ExpDef { const Poke* p; int n; const char* name; };
 const ExpDef kExps[] = {{kExp0, 1, "+0x4990=0"}, {kExp1, 1, "+0x160=4"}, {kExp2, 2, "+0x4990=0, +0x160=4"},
                         {kExp3, 8, "the six pairs (+0x1724 ... +0x46AC)"}, {kExp4, 10, "all of them"}};
-constexpr int kNExp = 5;
+constexpr int kNExp = 1;   // the first one turned out to release the car (it drove off)
 int g_exp = 0;                       // next experiment
 bool g_exp_on = false;
 uint32_t g_saved[3][16];
 std::atomic<uint64_t> g_gcalls{0};
 std::atomic<float> g_gpeak{0.0f};
 uint64_t g_exp_calls0 = 0;
+void* g_live[3] = {nullptr, nullptr, nullptr};   // cars whose engine step ran during the experiment (the shown car)
+bool is_live(const void* c) { for (void* l : g_live) if (l == c) return true; return false; }
 
 bool is_garage_car(const void* c) {
     for (int k = 0; k < g_n_gar.load(); ++k) if (g_gar_car[k] == c) return true;
@@ -138,6 +140,7 @@ void exp_step(bool shop_in_use) {
                 memcpy(c + e.p[i].off, &e.p[i].val, 4);
             }
         }
+        for (void*& l : g_live) l = nullptr;
         g_exp_on = true;
         g_gcalls = 0;
         g_gpeak = 0.0f;
@@ -156,6 +159,7 @@ void exp_step(bool shop_in_use) {
                  g_exp + 1, static_cast<unsigned long long>(g_gcalls.load()), static_cast<double>(g_gpeak.load()));
         plog(b);
         g_exp_on = false;
+        for (void*& l : g_live) l = nullptr;
         ++g_exp;
     }
 }
@@ -180,6 +184,10 @@ uint64_t detour_rel(void* self) {
             plog(b);
         }
     }
+    if (g_exp_on && is_live(car) && readable(car, 0x40)) {   // hold the car in place: no velocity, the wheels and the engine do their thing
+        float* v = reinterpret_cast<float*>(car + 0x10);
+        v[0] = v[1] = v[2] = 0.0f;
+    }
     if (g_have_drv.load() && g_n_snap.load() > 0) log_diff();
     if (g_have_drv.load() && g_n_gar.load() > 0) exp_step(not_driving());
     if (shop && shop != g_last_shop_logged.load() && GetTickCount64() - shop < 100 && g_n_gar.load() == 0 && g_have_drv.load()) {
@@ -192,8 +200,11 @@ uint64_t detour_rel(void* self) {
 
 bool detour_torque(void* self, float rpm, float throttle, void* r8, void* r9, uint64_t a5, uint64_t a6, uint64_t a7, uint64_t a8) {
     g_calls.fetch_add(1);
-    if (!is_garage_car(self)) g_last_torque_ms.store(GetTickCount64());
-    if (g_exp_on && is_garage_car(self)) {
+    if (!is_garage_car(self) && !(g_exp_on && is_live(self))) g_last_torque_ms.store(GetTickCount64());
+    if (g_exp_on && GetTickCount64() - g_last_torque_ms.load() > 0 && !is_live(self)) {
+        for (void*& l : g_live) if (!l) { l = self; break; }
+    }
+    if (g_exp_on && is_live(self)) {
         g_gcalls.fetch_add(1);
         if (rpm > g_gpeak.load()) g_gpeak = rpm;
         const float rt = trigger();
