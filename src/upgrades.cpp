@@ -425,8 +425,6 @@ bool rewrite(const char* z, size_t len, std::string& out) {
                        std::to_string(l ? g_up[i]->stages[l].price : 0L) + " AS Price, 0 AS IsException";
         out.append(un, len - static_cast<size_t>(un - z));
         g_cur_ord.store(ord);
-        g_shop_tick.store(GetTickCount64());
-        g_expect_build.store(GetTickCount64());
         return true;
     }
     if (z[0] == 'U') {
@@ -546,20 +544,6 @@ int detour_memcmp(const void* x, const void* y, size_t n) {
         t_sel_new = false;
         return 1;
     }
-    if (n == 0xB4 && GetTickCount64() - g_shop_tick.load() < 15000) {   // DIAGNOSTIC (temporary): who compares part sets in the shop
-        static std::atomic<int> lines{0};
-        const int r = g_orig_memcmp(x, y, n);
-        if (lines.fetch_add(1) < 300) {
-            const uintptr_t ret = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
-            const uintptr_t gb  = reinterpret_cast<uintptr_t>(game());
-            int pv = -1;
-            for (int q = 0; q < g_count.load(); ++q) pv = std::max(pv, g_up[q]->preview.load());
-            char buf[160];
-            snprintf(buf, sizeof buf, "upgrades: DIAG part sets compared (caller game+0x%llX): %s, preview %d", static_cast<unsigned long long>(gb && ret > gb ? ret - gb : 0), r ? "different" : "equal", pv);
-            plog(buf);
-        }
-        return r;
-    }
     return g_orig_memcmp(x, y, n);
 }
 
@@ -629,21 +613,15 @@ void* detour_rebuild(void* car, void* x, int y) {
 QueryBuildB g_orig_setup = nullptr;
 std::atomic<int> g_setup_logged{0};
 void* detour_setup(uint64_t car, uint64_t set, uint64_t c, uint64_t d, uint64_t e, uint64_t f, uint64_t g, uint64_t h, uint64_t i) {
-    g_shop_tick.store(GetTickCount64());
-    g_expect_build.store(GetTickCount64());
+    // The game also puts the player's setup on the car when it starts an event (caller game+0x361355): only the shop's
+    // cursor moves (game+0x16F98ED) say "the shop is open".
+    if (game() && reinterpret_cast<uintptr_t>(__builtin_return_address(0)) == reinterpret_cast<uintptr_t>(game()) + 0x16F98ED) {
+        g_shop_tick.store(GetTickCount64());
+        g_expect_build.store(GetTickCount64());
+    }
     bool had = false;
     const int n = g_count.load();
     for (int q = 0; q < n; ++q) had |= g_up[q]->preview.load() >= 0;
-    {   // DIAGNOSTIC (temporary)
-        static std::atomic<int> lines{0};
-        if (!had && lines.fetch_add(1) < 200) {
-            const uintptr_t ret = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
-            const uintptr_t gb  = reinterpret_cast<uintptr_t>(game());
-            char buf[120];
-            snprintf(buf, sizeof buf, "upgrades: DIAG setup on the car (caller game+0x%llX), no preview", static_cast<unsigned long long>(gb && ret > gb ? ret - gb : 0));
-            plog(buf);
-        }
-    }
     if (had) {
         clear_previews();
         if (g_setup_logged.fetch_add(1) < 200) {
@@ -1197,6 +1175,8 @@ void driven_car_seen(int32_t car_id, char* car) {
         std::scoped_lock lk{g_pc_mu};
         g_pc_car = car;
         g_pc_gid = g;
+        // the driven garage car is on the road: no new car of it is to come (a shop visit or switch is settled)
+        if (static_cast<unsigned>(g) == g_active.load()) g_expect_build.store(0);
     }
     if (g > 0) {
         if (g_foreign.load()) activate(static_cast<unsigned>(g), "the player's car again");
