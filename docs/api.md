@@ -792,6 +792,23 @@ void     upgrade_import(FH3Mod* mod, int handle, int32_t garage, int32_t ordinal
 
 Stage prices are charged by the platform when the player confirms the setup in the shop; stages that were bought stay owned, and switching back to an owned stage is free.
 
+### Shop preview (platform 1.0.2)
+
+While the player looks at a stage of your upgrade in the shop (moves the cursor onto it), `upgrade_stage` returns **that** stage for the car, and the shop rebuilds the car the same way it does for its own parts. So an upgrade whose effect is built into the car shows on hover, before it is bought, with no extra code. The preview ends when the stage is bought, when the shop is left without buying (Abandon), or when another car is driven; from then on `upgrade_stage` gives the fitted stage again.
+
+For your upgrade to show on hover:
+
+- **Read `upgrade_stage` at the moment the game builds the car** (in the hook on the game's car-building code), not once in `on_stage` and keep it. `on_stage` is not called for a preview: the stage is not fitted.
+- **Don't cache the stage** between builds. Reading it is cheap (no file access).
+- Pass the garage id (`upgrade_active_garage()`, or `0` for the car being driven). The preview belongs to the car in the shop.
+- Effects that only exist while driving (a nitro boost, for example) have nothing to show in the shop; they should use the fitted stage, which `on_stage` reports.
+
+Universal Wheel Spacers is the example: its hook on the car loader asks `upgrade_stage` for the front and rear stage every time the game builds a car and adds the width to the track values, so the wheels move out as the cursor goes down the stages.
+
+### The game's part set (platform 1.0.1)
+
+The game keeps a car's parts in a set of 43 slots (part enums 0 to 42) and the car's tuning right after it. Bridge upgrades use enums 47 and up, so they are **not** in that set: the platform keeps them out of it (the game's part setter has no bounds check, and before 1.0.1 a stage of a bridge upgrade overwrote tuning values such as the brake balance and the handbrake). The stage of a bridge upgrade is only what `upgrade_stage` says; don't look for it in the game's part data.
+
 ## Crash reports
 
 These need no code from you. If the game crashes, the platform writes `fh3-mods\crashes\crash-<date>-<time>.txt` and a minidump (`.dmp`) beside it, and adds the summary to `platform.log`. The report has the exception, the call stack as module+offset (`game+0x...`, `YourMod.dll+0x...`), the mod the crash came from, if any, and every hook in place (see above). When Azimuth 1.0.1 was running another game, it says which, so a crash there isn't taken for a mod's. The ten newest reports are kept. Open the minidump in Visual Studio or WinDbg with your mod's debug symbols to see the exact line.

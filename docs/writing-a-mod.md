@@ -127,6 +127,19 @@ Two rules matter. First, get the game's base from `wait_for_code`, not `wait_for
 
 If you can't use the platform's hooks for something (a patch in the middle of a function, say), still check the bytes are what you expect before you change them, and write them atomically.
 
+## A garage upgrade that changes the car
+
+The upgrade bridge ([api.md](api.md#custom-upgrades-the-upgrade-bridge-api-11)) gives your mod a real upgrade under Garage > Upgrades: shop, basket, price, purchase and the per-car stage are the platform's job. What your mod adds is the effect. The pattern that works (and shows the stage on hover in the shop, before it is bought):
+
+1. In `fh3mod_init`, call `register_upgrade` once per upgrade and keep the handle. Stage 0 is stock and fitted on every car.
+2. Find the place in the game's code where the car is built from its data (for a physical change, where the value you want to change is read or stored) and put a hook there (`hook_function`, or `hook_instruction` right after the store, API 7). Do this after `wait_for_code`.
+3. In the hook, ask `upgrade_stage(mod, handle, upgrade_active_garage())` and change the value by the stage. Check that the car being built is the one the stage is for (the game builds other cars too: showroom, traffic, opponents) - compare its model id with the one you stored for that garage.
+4. Don't keep the stage from `on_stage` for this: the shop preview doesn't call it. Use `on_stage` for things outside the car's data (a HUD, a sound, a boost while driving).
+5. Never write your part into the game's part set or tuning (enums 0 to 42 are the game's). The platform keeps bridge parts out of it.
+6. Put switches in your ini for each hook (`Apply...=1`), so a player can turn one off when it misbehaves; it is the quickest way to find which hook causes a problem.
+
+Universal Wheel Spacers ([source](https://github.com/Levilente/UniversalWheelSpacers_FH3)) follows these steps: two upgrades (front and rear, area 4, Tires and rims), one instruction hook in the car loader that adds the width to the track values, and per-hook switches in `WheelSpacers.ini`.
+
 ## Switches in the game
 
 If players will want to turn parts of your mod on and off, or tune a number, give them rows on the Mods page (API 4; sliders API 5): Pause > Settings > MODS, shared by every mod. You pass the current value and get told when the player changes it; you keep saving it in your own settings file, as before. Rows that only work after a restart are marked so, and the game then offers to restart for the player. From platform 2.8.0 (API 9) a row can also offer named choices, like a button or a mode, instead of a number standing for one. [`api.md`](api.md#the-mods-page-api-4-sliders-api-5) has the details and an example. Keep it to the main switches; fine-tuning still belongs in your ini.

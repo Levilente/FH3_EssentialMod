@@ -266,7 +266,19 @@ thunk (`0x1802D82`), and patches the basket check (`0x16FB341`). Purchases call 
 `0x36BDA0` and the garage-id getter `0x37AA10`. The game forgets a part when another one of the same type is fitted, so the owned stages are written
 back to `Profile0_Career_PurchasedParts` whenever the shop asks about them.
 
-## Track width (found 6 Nov, read from the exe and gamedbRC.slt, not yet run in the game)
+Found 6 Nov (platform 1.0.1 and 1.0.2):
+
+- **Part set and tuning.** The car's part set is `+8 + 4*enum` for enums 0 to 42 (enum 43, the wheel style, is at `+4`), 0xB4 bytes in all, and the
+  tuning setup follows it directly (the shop's 0x16C-byte setup compare covers both). The part setter `0x36B7A0` (`ecx` enum, `edx` part id, `r8d`, `r9d`,
+  stack: the part set, the change list) writes `set + 8 + 4*enum` without a bounds check, so a bridge part (enum 47+) landed in the tuning: enum 47
+  (Nitrous Kit) moved the brake balance to 100 % rear, 48/49 (spacers) took the handbrake away until the next start. The platform drops calls with an
+  enum above 43. Callers: `0x38D0B0` (shop), `0x410190` (part set from a list), and the setter itself for dependent parts.
+- **Show a part on the car**: `0x38D0B0` (`rcx` car, `edx` enum, `r8d` part id, `r9d`, 5th arg byte = refresh). It calls the setter, applies each change
+  (`0x38BCD0`, `0x3709C0`, `UPDATE %s SET %s = %d WHERE Id = %d` on the garage row) and, with refresh set, rebuilds the car (`0x3939F0(car, 0)`,
+  `0x36E310(car)`). The shop calls it with refresh on every cursor move over a part (`0x16F9901`); the commit (`0x4081A0`, from `0x4082DF`) calls it
+  for each basket entry with refresh off. The platform hooks it to know the stage on screen (shop preview).
+
+## Track width (found 6 Nov; tested in the game with Universal Wheel Spacers)
 
 - The database has `CarTrackOffsets(Id, FrontOffset, RearOffset, UpgradeFrontOffset, UpgradeRearOffset)`: 86 rows, `Id` is the car model
   id (`Data_Car.Id`), values in metres (e.g. -0.043 to 0.025). `Data_CarBody` has `ModelFrontTrackOuter` / `ModelRearTrackOuter`.
@@ -275,5 +287,18 @@ back to `Profile0_Career_PurchasedParts` whenever the shop asks about them.
   id is `*(int*)(*(char**)(this + 0x110) + 0x30)`. It stores, as floats: `+0x7734` front tire width (mm to m), `+0x773C` FrontOffset,
   `+0x7740` RearOffset, `+0x7744` UpgradeFrontOffset, `+0x7748` UpgradeRearOffset (a car with no row gets 0). `0x189F8B8`
   (`mov rcx, [rdi+0x71E8]`) is right after the four stores.
-- No instruction reads `+0x773C..+0x7748` directly, so how the physics and the model use them is not known yet; which pair applies with
-  stock or aftermarket wheels is not verified. The Universal Wheel Spacers mod adds its width to all four at `0x189F8B8`.
+- No instruction reads `+0x773C..+0x7748` directly. Changing them (tested 6 Nov) moves nothing in the game.
+
+**What moves the wheels (tested in the game, 6 Nov).** The central car loader `0x19E6A80` reads `Data_CarBody.ModelFrontTrackOuter` /
+`ModelRearTrackOuter` (metres, outer tire edge to outer tire edge) into the car spec at `+0xF4` / `+0xF8`; `0x19E9027`
+(`lea rcx, [rbp+0x640]`) is right after. The Data_Car id (`model * 1000 + variant`, e.g. 2154002) is at `[rsp+0x68]` there (`r12` is
+reused). The spec converter `0x1D637B0` then writes the centre track: `dest+0x6BC = spec[0x5B4] + spec[0xF4] - 0.001 * spec[0xED0]`
+(front) and `dest+0x6C0` (rear), which the physics and the model both use. Adding `2 * w` to `+0xF4` / `+0xF8` moves each wheel out by
+`w` and widens the physical track too: Universal Wheel Spacers does this. The loader runs for every car the game builds (the driven car,
+the shop's car on every preview, other cars), so a mod must check the model.
+
+- The body loader `0x18BAB60` (tail call from `0x18B8D20`, vtable slot at `.data 0x462D1F8`) stores the same two values at car `+0x234` /
+  `+0x238`, but only when the body or wheels change (a widebody kit); it is not used for a spacer. Changing them there (hook `0x18BADED`) seemed
+  to take the handbrake away in a test, so it is left alone.
+- Steering geometry (`SteerRotAxisTireOffsetX` from `List_SpringDamperPhysics`, spec `+0xA0`, stored at `0x19F5E16`) is not changed by
+  the spacers; the brake and handbrake problems seen with them were the part-set overflow above, not the geometry.
