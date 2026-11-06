@@ -1846,9 +1846,13 @@ std::string tune_row_xaml(std::size_t i, const TuneRow& r) {
     auto fmt = [&](float f) { char b[32]; std::snprintf(b, sizeof b, "%.*f", r.decimals, static_cast<double>(f)); return std::string(b); };
     const std::string vis = "Visibility=\"{Binding Tuning.FH3Mod_TuneVis_" + n + ", Converter={StaticResource FH3Mod_TuneShow}}\"";
     std::string x;
-    x += "                                <ListBoxItem Style=\"{StaticResource A_Style_ListBoxItem_List_Tuning}\" Focusable=\"False\" local:BindingProxy.B=\"{StaticResource A_Style_FZMaterial_AcrylicPanel_BodyPanel}\"\r\n"
-         "                                             " + vis + ">\r\n"
-         "                                <ItemsControl Style=\"{StaticResource A_Style_ItemsControl_1x3_TuningSpaced_Header}\">\r\n"
+    // The game's list item template takes its background from the attached BindingProxy.B of its DataContext, which for the game's own
+    // rows (items of the list) is the row's ItemsControl itself. Our rows are written as list items, so the header's item gets the
+    // header ItemsControl as its DataContext (the dark panel style the game's header bands set), and its visibility reads the
+    // view-model through the page instead.
+    x += "                                <ListBoxItem Style=\"{StaticResource A_Style_ListBoxItem_List_Tuning}\" Focusable=\"False\" DataContext=\"{Binding ElementName=FH3Mod_Tune_Head_" + n + "}\"\r\n"
+         "                                             Visibility=\"{Binding DataContext.Tuning.FH3Mod_TuneVis_" + n + ", RelativeSource={RelativeSource AncestorType=Page}, Converter={StaticResource FH3Mod_TuneShow}}\">\r\n"
+         "                                <ItemsControl x:Name=\"FH3Mod_Tune_Head_" + n + "\" Style=\"{StaticResource A_Style_ItemsControl_1x3_TuningSpaced_Header}\">\r\n"
          "                                    <local:FZTextBlock Style=\"{StaticResource A_Style_FZTextBlock_Tune_ItemTitle}\" Text=\"" + xml_escape(head) + "\" HorizontalAlignment=\"Left\" Grid.Column=\"0\" />\r\n"
          "                                    <local:FZTextBlock Style=\"{StaticResource A_Style_FZTextBlock_Tune_ItemTitle}\" Text=\"" + fmt(r.fmin) + "\" HorizontalAlignment=\"Left\" Grid.Column=\"1\" />\r\n"
          "                                    <local:FZTextBlock Style=\"{StaticResource A_Style_FZTextBlock_Tune_ItemTitle}\" Text=\"" + fmt(r.fmax) + "\" HorizontalAlignment=\"Right\" Grid.Column=\"1\" />\r\n"
