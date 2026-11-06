@@ -588,7 +588,9 @@ typedef struct FH3ModApi {
        game read last (within a minute: an event's car select reads the chosen car), or, with FH3MOD_CAR_IS_PLAYERS,
        the player's car of that model even without such a read. FH3MOD_CAR_MAKE_DRIVEN makes the answer the driven
        car (upgrade_active_garage, the stage callbacks run). Use it when the game builds or drives a car: the driven
-       garage id the platform learns from the game's statements can lag behind a car switch by several seconds. */
+       garage id the platform learns from the game's statements can lag behind a car switch by several seconds.
+       Called while the game builds a car (from a hook in the car loader), it also answers whether that car is the
+       player's: an AI car of the player's model (a one-make race) gets 0, so it gets none of the player's upgrades. */
     int32_t (*upgrade_garage_for_car)(int32_t car_id, uint32_t flags);
     /* The stage of your upgrade on a car the game builds, by the car's Data_Car id: the stage of the player's car of
        that model (see upgrade_garage_for_car; it becomes the driven car), 0 when it isn't one of the player's cars.

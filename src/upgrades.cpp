@@ -63,6 +63,8 @@ std::mutex g_reg_mu;
 std::atomic<bool> g_started{false};
 std::atomic<unsigned> g_active{0};   // garage id of the car being driven
 std::atomic<bool> g_foreign{false};  // the car being driven isn't one of the player's (a loaner): no custom upgrades
+std::atomic<uint64_t> g_shop_tick{0};   // the last time the upgrade shop did something (its car is the player's)
+std::atomic<uint64_t> g_expect_build{0}; // since when a new car of the player's is expected (car switch, shop)
 std::atomic<long> g_cur_ord{0};      // car ordinal of the last UpgradeParts view
 
 std::wstring ini_path() { return (azimuth_dir() / L"fh3-mods" / L"platform-upgrades.ini").wstring(); }
@@ -179,6 +181,7 @@ void activate(unsigned gid, const char* why = "") {
         return;
     }
     g_foreign.store(false);
+    g_expect_build.store(GetTickCount64());
     clear_previews();
     for (int i = 0; i < g_count.load(); ++i) g_up[i]->pend.store(false);   // a basket belongs to the car it was filled for
     plog("upgrades: driven car is garage " + std::to_string(gid) + " (was " + std::to_string(g_active.load()) + ", " + why + ")");
@@ -418,6 +421,8 @@ bool rewrite(const char* z, size_t len, std::string& out) {
                        std::to_string(l ? g_up[i]->stages[l].price : 0L) + " AS Price, 0 AS IsException";
         out.append(un, len - static_cast<size_t>(un - z));
         g_cur_ord.store(ord);
+        g_shop_tick.store(GetTickCount64());
+        g_expect_build.store(GetTickCount64());
         return true;
     }
     if (z[0] == 'U') {
@@ -517,6 +522,8 @@ bool any_pending() {
 // previewed and leaves when they are equal. A part of an enum above 42 never changes those bytes, so it never counts
 // as a change. While that handler runs for such a part, that one comparison says "different".
 void* detour_select(ARGS12) {
+    g_shop_tick.store(GetTickCount64());
+    g_expect_build.store(GetTickCount64());
     const bool ours = static_cast<int>(b) > 42;
     if (ours) t_sel_new = true;
     void* r = g_orig_select(PASS12);
@@ -545,6 +552,8 @@ int detour_memcmp(const void* x, const void* y, size_t n) {
 QueryBuildB g_orig_show = nullptr;
 std::atomic<int> g_show_logged{0};
 void* detour_show(uint64_t car, uint64_t e, uint64_t part, uint64_t d, uint64_t flag, uint64_t g, uint64_t h, uint64_t i, uint64_t j) {
+    g_shop_tick.store(GetTickCount64());
+    g_expect_build.store(GetTickCount64());
     const bool shop = (flag & 0xFF) != 0;
     const int en    = static_cast<int>(e);
     if (shop) {
@@ -602,6 +611,8 @@ void* detour_rebuild(void* car, void* x, int y) {
 QueryBuildB g_orig_setup = nullptr;
 std::atomic<int> g_setup_logged{0};
 void* detour_setup(uint64_t car, uint64_t set, uint64_t c, uint64_t d, uint64_t e, uint64_t f, uint64_t g, uint64_t h, uint64_t i) {
+    g_shop_tick.store(GetTickCount64());
+    g_expect_build.store(GetTickCount64());
     bool had = false;
     const int n = g_count.load();
     for (int q = 0; q < n; ++q) had |= g_up[q]->preview.load() >= 0;
@@ -624,6 +635,8 @@ void* detour_setup(uint64_t car, uint64_t set, uint64_t c, uint64_t d, uint64_t 
 // its table). An upgrade that asks for the camera of a game part gets that part's enum here.
 QueryBuildB g_orig_camera = nullptr;
 void* detour_camera(uint64_t self, uint64_t area, uint64_t e, uint64_t d, uint64_t f, uint64_t g, uint64_t h, uint64_t i, uint64_t j) {
+    g_shop_tick.store(GetTickCount64());
+    g_expect_build.store(GetTickCount64());
     const int en = static_cast<int>(e);
     if (en > 43) {
         const int n = g_count.load();
@@ -685,8 +698,6 @@ __asm__(".text\n.globl fh3_basket_stub\nfh3_basket_stub:\n"
         "jmp *g_fh3_skip_target(%rip)\n"
         "1: ret\n");
 // the player's car, from the HUD controller (defined below the shop code)
-void* detour_loader(ARGS12);
-extern Fn12 g_orig_loader;
 void* detour_carbuild(ARGS12);
 extern Fn12 g_orig_carbuild;
 uint64_t detour_hud(void* c, void* a, void* b, void* d);
@@ -887,8 +898,7 @@ void install_hooks() {
         {0x16F7ED0, reinterpret_cast<void*>(detour_camera), "upgrades: shop camera for a part", reinterpret_cast<void**>(&g_orig_camera)},
     };
     for (const H& h : hooks) hook_game_function(h.rva, h.detour, h.what, h.orig);
-    hook_game_function_shared(0x189BCC0, reinterpret_cast<void*>(detour_carbuild), "PROBE: in-Car build", reinterpret_cast<void**>(&g_orig_carbuild));
-    hook_game_function_shared(0x19E6A80, reinterpret_cast<void*>(detour_loader), "PROBE: central car loader", reinterpret_cast<void**>(&g_orig_loader));
+    hook_game_function_shared(0x189BCC0, reinterpret_cast<void*>(detour_carbuild), "upgrades: a car is built (in-Car spec)", reinterpret_cast<void**>(&g_orig_carbuild));
     hook_game_function_shared(0xB26690, reinterpret_cast<void*>(detour_hud), "upgrades: the player's car (HUD controller)", reinterpret_cast<void**>(&g_orig_hud));
     install_basket_patch(reinterpret_cast<uintptr_t>(find_game()));
     // seed the car being driven from the last session, until the game's statements say which it is
@@ -1038,6 +1048,65 @@ int32_t upgrades_car_model(int32_t garage) {
     return it != g_gar_car.end() ? static_cast<int32_t>(car_model(it->second)) : 0;
 }
 
+// ---- is the car being built the player's? ---------------------------------------------------------------------
+// The game builds every car through game+0x189BCC0 (rcx = the new Car; the spec the loader fills is Car+0x140), the
+// player's and the AI's alike, and the spec can't be changed later with any effect. An AI car of the player's model
+// (a one-make race) would get the player's custom upgrades. The platform keeps the player's Car (the one it accepted
+// last, or the one the HUD shows) and decides per build: a new car of that model while the player's car of that
+// model is still on the road (same garage car, object alive) is someone else's; the upgrade shop's car, a car
+// after a switch to another garage car, or the first car of a model is the player's.
+thread_local char* t_build_car    = nullptr;   // the Car being built on this thread
+thread_local int t_build_verdict  = -1;        // -1 not decided yet, 0 not the player's, 1 the player's
+std::mutex g_pc_mu;
+char* g_pc_car  = nullptr;   // the player's Car
+long g_pc_gid   = 0;         // its garage id
+Fn12 g_orig_carbuild = nullptr;
+
+bool car_alive(const char* car, long model) {
+    char* g = game();
+    if (!g || !car || !readable(car, 0x118)) return false;
+    if (*reinterpret_cast<const uintptr_t*>(car) != reinterpret_cast<uintptr_t>(g) + 0x42E0650) return false;   // Car's vtable (a destroyed one has a base's)
+    const char* spec = *reinterpret_cast<char* const*>(car + 0x110);
+    if (!spec || !readable(spec + 0x30, 4)) return true;   // not complete yet: still counts
+    return car_model(*reinterpret_cast<const int32_t*>(spec + 0x30)) == model;
+}
+
+bool build_is_players(long gid, long model) {
+    if (t_build_verdict >= 0) return t_build_verdict == 1;
+    char* const c      = t_build_car;
+    const uint64_t now = GetTickCount64();
+    const char* why    = nullptr;
+    bool mine          = true;
+    {
+        std::scoped_lock lk{g_pc_mu};
+        const uint64_t ex = g_expect_build.load();
+        if (now - g_shop_tick.load() < 5000) why = "the upgrade shop's car";
+        else if (ex && now - ex < 180000) { why = "a new car for the player"; g_expect_build.store(0); }
+        else if (g_pc_car && g_pc_car != c && g_pc_gid == gid && car_alive(g_pc_car, model)) { mine = false; why = "the player's car of that model is on the road already"; }
+        else why = "no car of the player's of that model on the road";
+        if (mine) { g_pc_car = c; g_pc_gid = gid; }
+    }
+    t_build_verdict = mine ? 1 : 0;
+    static std::atomic<int> lines{0};
+    if (lines.fetch_add(1) < 200) {
+        char b[220];
+        snprintf(b, sizeof b, "upgrades: car %p (model %ld) is built: %s (%s)", static_cast<void*>(c), model, mine ? "the player's, garage car " : "someone else's, not garage car ", why);
+        plog(std::string(b) + (mine ? std::to_string(gid) : std::to_string(gid)));
+    }
+    return mine;
+}
+
+void* detour_carbuild(ARGS12) {
+    char* const prev_car = t_build_car;
+    const int prev_v     = t_build_verdict;
+    t_build_car          = reinterpret_cast<char*>(a);
+    t_build_verdict      = -1;
+    void* r              = g_orig_carbuild(PASS12);
+    t_build_car          = prev_car;
+    t_build_verdict      = prev_v;
+    return r;
+}
+
 int32_t upgrades_garage_for_car(int32_t car_id, uint32_t flags) {
     if (car_id <= 0) return 0;
     const long want   = car_model(car_id);
@@ -1061,12 +1130,13 @@ int32_t upgrades_garage_for_car(int32_t car_id, uint32_t flags) {
         const int32_t m = act ? upgrades_car_model(static_cast<int32_t>(act)) : 0;
         return act && (m <= 0 || car_model(m) == want) ? static_cast<int32_t>(act) : 0;
     }
-    if (act_in) return static_cast<int32_t>(act);
+    if (act_in) return t_build_car && !build_is_players(static_cast<long>(act), want) ? 0 : static_cast<int32_t>(act);
     if (!cands) return 0;   // none of the player's cars is that model: a loaner, an AI car
     const char* why = nullptr;
     if (best_t && GetTickCount64() - best_t < 60000) why = "the game read it just before";
     else if (flags & FH3MOD_CAR_IS_PLAYERS) why = "the player's car is that model";
     if (!why) return 0;
+    if (t_build_car && !build_is_players(best, want)) return 0;
     if (flags & FH3MOD_CAR_MAKE_DRIVEN) {
         const std::string r = std::string("model ") + std::to_string(want) + ", " + why;
         activate(static_cast<unsigned>(best), r.c_str());
@@ -1085,7 +1155,7 @@ int upgrades_stage_for_car(int handle, int32_t car_id) {
 // the platform checks which car that is: one of the player's (it becomes the driven car, so every mod's stage
 // callback and upgrade_stage follow a car switch at once) or none of them (a loaner: no custom upgrades on it).
 
-void driven_car_seen(int32_t car_id) {
+void driven_car_seen(int32_t car_id, char* car) {
     static std::atomic<int32_t> last{0};
     if (car_id < 100 || car_id >= 100000000) return;
     bool known = false;
@@ -1095,6 +1165,11 @@ void driven_car_seen(int32_t car_id) {
     }
     if (!known) return;   // the garage isn't read yet: nothing to compare with
     const int32_t g = upgrades_garage_for_car(car_id, FH3MOD_CAR_MAKE_DRIVEN | FH3MOD_CAR_IS_PLAYERS);
+    if (g > 0 && car) {
+        std::scoped_lock lk{g_pc_mu};
+        g_pc_car = car;
+        g_pc_gid = g;
+    }
     if (g > 0) {
         if (g_foreign.load()) activate(static_cast<unsigned>(g), "the player's car again");
     } else if (!g_foreign.exchange(true)) {
@@ -1105,123 +1180,6 @@ void driven_car_seen(int32_t car_id) {
     }
     if (last.exchange(car_id) != car_id)
         plog("upgrades: the player drives Data_Car " + std::to_string(car_id) + (g > 0 ? ", garage car " + std::to_string(g) : std::string(", not one of the player's cars")));
-}
-
-// ---- TEMPORARY PROBE: which car builds are the player's? -------------------------------------------------------------
-// Logs every call of the central car loader (game+0x19E6A80: rcx = spec, r8 = &Data_Car id) with its callers, and the
-// player's Car / spec from the HUD, to learn how the game builds the player's car and an AI car of the same model.
-Fn12 g_orig_loader = nullptr;
-std::atomic<int> g_probe_lines{0};
-struct ProbeBuild { char* spec; int car; int seq; };
-ProbeBuild g_probe_ring[128] = {};
-std::atomic<int> g_probe_seq{0};
-std::mutex g_probe_mu;
-void* detour_loader(ARGS12) {
-    void* bt[8] = {};
-    const USHORT nf = RtlCaptureStackBackTrace(1, 8, bt, nullptr);
-    void* r = g_orig_loader(PASS12);
-    {
-        const int sq = g_probe_seq.fetch_add(1) + 1;
-        std::scoped_lock lk{g_probe_mu};
-        g_probe_ring[sq % 128] = {reinterpret_cast<char*>(a), (c && readable(reinterpret_cast<void*>(c), 4)) ? *reinterpret_cast<int*>(c) : 0, sq};
-    }
-    if (g_probe_lines.fetch_add(1) < 400) {
-        char* spec = reinterpret_cast<char*>(a);
-        int id = 0;
-        if (c && readable(reinterpret_cast<void*>(c), 4)) id = *reinterpret_cast<int*>(c);
-        float tf = 0, tr = 0;
-        int sid = 0;
-        if (spec && readable(spec + 0xF8, 4)) { tf = *reinterpret_cast<float*>(spec + 0xF4); tr = *reinterpret_cast<float*>(spec + 0xF8); sid = *reinterpret_cast<int*>(spec + 0x30); }
-        char* g = game();
-        std::string chain;
-        for (USHORT i = 0; i < nf; ++i) {
-            char b[24];
-            const uintptr_t v = reinterpret_cast<uintptr_t>(bt[i]);
-            if (g && v >= reinterpret_cast<uintptr_t>(g) && v < reinterpret_cast<uintptr_t>(g) + 0x6000000) snprintf(b, sizeof b, " g+%llX", (unsigned long long)(v - reinterpret_cast<uintptr_t>(g)));
-            else snprintf(b, sizeof b, " %p", bt[i]);
-            chain += b;
-        }
-        char line[400];
-        snprintf(line, sizeof line, "PROBE build #%d: car %d (spec id %d), spec %p, track %.3f/%.3f, thread %lu, d=%llX, active garage %u%s, callers%s", g_probe_seq.load(), id, sid, spec, tf, tr,
-                 GetCurrentThreadId(), (unsigned long long)d, g_active.load(), g_foreign.load() ? " (foreign)" : "", chain.c_str());
-        plog(line);
-    }
-    return r;
-}
-
-// PROBE 4: the in-Car build (game+0x189BCC0: rcx = Car, rdx = request, r8b, r9b), which runs the loader on Car+0x140.
-Fn12 g_orig_carbuild = nullptr;
-void* detour_carbuild(uint64_t a, uint64_t b_, uint64_t c, uint64_t d, uint64_t e, uint64_t f, uint64_t g_, uint64_t h, uint64_t i, uint64_t j, uint64_t k, uint64_t l) {
-    if (g_probe_lines.fetch_add(1) < 600) {
-        char* g = game();
-        const uintptr_t ra = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
-        std::string line;
-        char b[64];
-        snprintf(b, sizeof b, "PROBE carbuild: Car %p req %p r8 %u r9 %u from ", reinterpret_cast<void*>(a), reinterpret_cast<void*>(b_), (unsigned)(c & 0xFF), (unsigned)(d & 0xFF));
-        line = b;
-        if (g && ra > reinterpret_cast<uintptr_t>(g)) { snprintf(b, sizeof b, "g+%llX", (unsigned long long)(ra - reinterpret_cast<uintptr_t>(g))); line += b; }
-        auto dump = [&](const char* name, uintptr_t p, size_t n) {
-            line += std::string(" | ") + name + ":";
-            if (!p || !readable(reinterpret_cast<void*>(p), n)) { line += " ?"; return; }
-            for (size_t o = 0; o < n; o += 8) { snprintf(b, sizeof b, " %llX", (unsigned long long)*reinterpret_cast<uint64_t*>(p + o)); line += b; }
-        };
-        dump("req", b_, 0x80);
-        dump("car", a, 0x140);
-        plog(line);
-    }
-    return g_orig_carbuild(a, b_, c, d, e, f, g_, h, i, j, k, l);
-}
-
-void probe_hud_car(char* car, char* spec) {
-    static std::atomic<char*> last_car{nullptr}, last_spec{nullptr};
-    if (last_car.exchange(car) == car && last_spec.exchange(spec) == spec) return;
-    last_spec.store(spec);
-    if (g_probe_lines.fetch_add(1) >= 400) return;
-    int sid = 0;
-    float tf = 0, tr = 0;
-    if (spec && readable(spec + 0xF8, 4)) { sid = *reinterpret_cast<int*>(spec + 0x30); tf = *reinterpret_cast<float*>(spec + 0xF4); tr = *reinterpret_cast<float*>(spec + 0xF8); }
-    char line[200];
-    snprintf(line, sizeof line, "PROBE player's Car %p, spec %p (id %d, track %.3f/%.3f)", car, spec, sid, tf, tr);
-    plog(line);
-    // Which of the loader's specs does the player's Car lead to? Pointers in the Car (0x1800 bytes) and one level below.
-    ProbeBuild ring[128];
-    {
-        std::scoped_lock lk{g_probe_mu};
-        memcpy(ring, g_probe_ring, sizeof ring);
-    }
-    auto match = [&](uintptr_t v) -> const ProbeBuild* {
-        if (!v) return nullptr;
-        for (const ProbeBuild& b : ring)
-            if (b.spec && v >= reinterpret_cast<uintptr_t>(b.spec) && v < reinterpret_cast<uintptr_t>(b.spec) + 0x200) return &b;
-        return nullptr;
-    };
-    int found = 0;
-    for (size_t o = 0; o < 0x1800 && found < 12; o += 8) {
-        if (!readable(car + o, 8)) break;
-        const uintptr_t v = *reinterpret_cast<uintptr_t*>(car + o);
-        if (const ProbeBuild* b = match(v)) {
-            snprintf(line, sizeof line, "PROBE   Car+0x%zX -> build #%d (car %d) spec %p +0x%llX", o, b->seq, b->car, b->spec, (unsigned long long)(v - reinterpret_cast<uintptr_t>(b->spec)));
-            plog(line);
-            ++found;
-            continue;
-        }
-        if (v < 0x10000 || (v & 7) || !readable(reinterpret_cast<void*>(v), 0x400)) continue;
-        for (size_t p2 = 0; p2 < 0x400 && found < 12; p2 += 8) {
-            const uintptr_t w = *reinterpret_cast<uintptr_t*>(v + p2);
-            if (const ProbeBuild* b = match(w)) {
-                snprintf(line, sizeof line, "PROBE   [Car+0x%zX]+0x%zX -> build #%d (car %d) spec %p +0x%llX", o, p2, b->seq, b->car, b->spec, (unsigned long long)(w - reinterpret_cast<uintptr_t>(b->spec)));
-                plog(line);
-                ++found;
-            }
-        }
-    }
-    // the specs of the player's model still alive: their track now
-    for (const ProbeBuild& b : ring)
-        if (b.spec && b.car > 0 && sid > 0 && b.car == (sid >= 100000 ? sid / 1000 : sid) && readable(b.spec + 0xF8, 4)) {
-            snprintf(line, sizeof line, "PROBE   build #%d spec %p: track now %.3f/%.3f", b.seq, b.spec, *reinterpret_cast<float*>(b.spec + 0xF4), *reinterpret_cast<float*>(b.spec + 0xF8));
-            plog(line);
-        }
-    if (!found) plog("PROBE   no pointer from the Car to a recent spec");
 }
 
 uint64_t detour_hud(void* c, void* a, void* b, void* d) {
@@ -1236,8 +1194,7 @@ uint64_t detour_hud(void* c, void* a, void* b, void* d) {
     if (!car || !cb || !readable(car + 0x110, 8)) return r;
     char* spec = *reinterpret_cast<char**>(car + 0x110);
     if (!spec || !readable(spec + 0x30, 4)) return r;
-    probe_hud_car(car, spec);
-    driven_car_seen(*reinterpret_cast<int32_t*>(spec + 0x30));
+    driven_car_seen(*reinterpret_cast<int32_t*>(spec + 0x30), car);
     return r;
 }
 
