@@ -591,6 +591,12 @@ void* detour_show(uint64_t car, uint64_t e, uint64_t part, uint64_t d, uint64_t 
 QueryBuildA g_orig_rebuild = nullptr;
 std::atomic<int> g_rebuild_logged{0};
 void* detour_rebuild(void* car, void* x, int y) {
+    {
+        const uintptr_t ret0 = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+        const uintptr_t gb0  = reinterpret_cast<uintptr_t>(game());
+        // The show step (game+0x38D28E) starts the rebuild of a previewed stage; any other caller is the shop putting the car back (backing out of the list).
+        if (gb0 && ret0 > gb0 && ret0 - gb0 != 0x38D28E) clear_previews();
+    }
     if (g_rebuild_logged.fetch_add(1) < 300) {
         const uintptr_t ret = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
         const uintptr_t gb  = reinterpret_cast<uintptr_t>(game());
@@ -1039,13 +1045,13 @@ int upgrades_stage(int handle, int32_t garage) {
     }
     return get_stage(u, gid, 0);
 }
-// The stage the shop's list is showing on the car while the cursor stays on it (-1: none). No time limit, unlike upgrades_stage; a stage in the basket
-// doesn't count (the cursor has left it), the preview ends with the shop's setup puts as before.
+// The stage the shop's list is showing on the car while the cursor stays on it (-1: none). No time limit, unlike upgrades_stage; it also answers while the
+// stage is in the basket (the cursor is on it again). The preview ends with the shop's setup puts and with any car rebuild the show step didn't start.
 int upgrades_preview_stage(int handle) {
     Upgrade* u = handle_upgrade(handle);
     if (!u || g_foreign.load()) return -1;
     const int pv = u->preview.load();
-    if (pv < 0 || pv >= u->count() || u->preview_gid.load() != static_cast<long>(g_active.load()) || u->pend.load()) return -1;
+    if (pv < 0 || pv >= u->count() || u->preview_gid.load() != static_cast<long>(g_active.load())) return -1;
     return pv;
 }
 uint32_t upgrades_active_garage() { return g_foreign.load() ? 0u : g_active.load(); }
