@@ -336,8 +336,12 @@ void refresh_garage_map(void* db) {
     if (before != g_gar_car.size()) plog("upgrades: the player's garage has " + std::to_string(g_gar_car.size()) + " cars");
 }
 
+// Only the statements the game runs when it puts the player into a garage car count ("... AND IsCarInstalled(Car)",
+// "SELECT * ... WHERE Id=n"): browsing the garage reads every car with "SELECT 1 ... WHERE Id=n", which says nothing
+// about the car that will be driven.
 void touch_garage(long gid, const char* z) {
     if (gid <= 0 || gid >= 2000000000L) return;
+    if (!strstr(z, "IsCarInstalled") && strncmp(z, "SELECT * FROM Profile0_Career_Garage WHERE Id", 45) != 0) return;
     {
         std::scoped_lock lk{g_gar_mu};
         g_gar_touch[gid] = GetTickCount64();
@@ -542,6 +546,20 @@ int detour_memcmp(const void* x, const void* y, size_t n) {
         t_sel_new = false;
         return 1;
     }
+    if (n == 0xB4 && GetTickCount64() - g_shop_tick.load() < 15000) {   // DIAGNOSTIC (temporary): who compares part sets in the shop
+        static std::atomic<int> lines{0};
+        const int r = g_orig_memcmp(x, y, n);
+        if (lines.fetch_add(1) < 300) {
+            const uintptr_t ret = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+            const uintptr_t gb  = reinterpret_cast<uintptr_t>(game());
+            int pv = -1;
+            for (int q = 0; q < g_count.load(); ++q) pv = std::max(pv, g_up[q]->preview.load());
+            char buf[160];
+            snprintf(buf, sizeof buf, "upgrades: DIAG part sets compared (caller game+0x%llX): %s, preview %d", static_cast<unsigned long long>(gb && ret > gb ? ret - gb : 0), r ? "different" : "equal", pv);
+            plog(buf);
+        }
+        return r;
+    }
     return g_orig_memcmp(x, y, n);
 }
 
@@ -616,6 +634,16 @@ void* detour_setup(uint64_t car, uint64_t set, uint64_t c, uint64_t d, uint64_t 
     bool had = false;
     const int n = g_count.load();
     for (int q = 0; q < n; ++q) had |= g_up[q]->preview.load() >= 0;
+    {   // DIAGNOSTIC (temporary)
+        static std::atomic<int> lines{0};
+        if (!had && lines.fetch_add(1) < 200) {
+            const uintptr_t ret = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+            const uintptr_t gb  = reinterpret_cast<uintptr_t>(game());
+            char buf[120];
+            snprintf(buf, sizeof buf, "upgrades: DIAG setup on the car (caller game+0x%llX), no preview", static_cast<unsigned long long>(gb && ret > gb ? ret - gb : 0));
+            plog(buf);
+        }
+    }
     if (had) {
         clear_previews();
         if (g_setup_logged.fetch_add(1) < 200) {
@@ -1081,7 +1109,7 @@ bool build_is_players(long gid, long model) {
         std::scoped_lock lk{g_pc_mu};
         const uint64_t ex = g_expect_build.load();
         if (now - g_shop_tick.load() < 5000) why = "the upgrade shop's car";
-        else if (ex && now - ex < 180000) { why = "a new car for the player"; g_expect_build.store(0); }
+        else if (ex && now - ex < 180000 && static_cast<unsigned>(gid) == g_active.load()) { why = "a new car for the player"; g_expect_build.store(0); }
         else if (g_pc_car && g_pc_car != c && g_pc_gid == gid && car_alive(g_pc_car, model)) { mine = false; why = "the player's car of that model is on the road already"; }
         else why = "no car of the player's of that model on the road";
         if (mine) { g_pc_car = c; g_pc_gid = gid; }
