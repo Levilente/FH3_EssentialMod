@@ -128,37 +128,48 @@ bool is_garage_car(const void* c) {
     return false;
 }
 
-void exp_step(bool shop_in_use) {
+constexpr int kMaxExp = 8;
+char* g_exp_cars[kMaxExp];
+uint32_t g_exp_saved[kMaxExp][16];
+int g_exp_n = 0;
+
+void exp_apply(char* c) {   // put the experiment's values on one car (once), remembering what was there
+    if (g_exp_n >= kMaxExp || !readable(c, kSnap)) return;
+    for (int k = 0; k < g_exp_n; ++k) if (g_exp_cars[k] == c) return;
+    const ExpDef& e = kExps[g_exp % kNExp];
+    for (int i = 0; i < e.n; ++i) {
+        memcpy(&g_exp_saved[g_exp_n][i], c + e.p[i].off, 4);
+        memcpy(c + e.p[i].off, &e.p[i].val, 4);
+    }
+    g_exp_cars[g_exp_n++] = c;
+    char b[120];
+    snprintf(b, sizeof b, "rev probe: experiment value set on car %p", static_cast<void*>(c));
+    plog(b);
+}
+
+void exp_step(bool in_garage) {
     const float rt = trigger();
-    if (!g_exp_on && rt > 0.8f && shop_in_use && g_n_gar.load() > 0) {
+    if (!g_exp_on && rt > 0.8f && in_garage) {
         const ExpDef& e = kExps[g_exp % kNExp];
-        for (int k = 0; k < g_n_gar.load(); ++k) {
-            char* c = static_cast<char*>(g_gar_car[k]);
-            if (!readable(c, kSnap)) continue;
-            for (int i = 0; i < e.n; ++i) {
-                memcpy(&g_saved[k][i], c + e.p[i].off, 4);
-                memcpy(c + e.p[i].off, &e.p[i].val, 4);
-            }
-        }
+        g_exp_n = 0;
         for (void*& l : g_live) l = nullptr;
         g_exp_on = true;
         g_gcalls = 0;
         g_gpeak = 0.0f;
+        for (int k = 0; k < g_n_gar.load(); ++k) exp_apply(static_cast<char*>(g_gar_car[k]));
         char b[160];
-        snprintf(b, sizeof b, "rev probe: press %d: experiment %d (%s) applied", g_exp + 1, g_exp % kNExp, e.name);
+        snprintf(b, sizeof b, "rev probe: press %d: experiment %d (%s) applied to %d car(s)", g_exp + 1, g_exp % kNExp, e.name, g_exp_n);
         plog(b);
     } else if (g_exp_on && rt < 0.2f) {
         const ExpDef& e = kExps[g_exp % kNExp];
-        for (int k = 0; k < g_n_gar.load(); ++k) {
-            char* c = static_cast<char*>(g_gar_car[k]);
-            if (!readable(c, kSnap)) continue;
-            for (int i = 0; i < e.n; ++i) memcpy(c + e.p[i].off, &g_saved[k][i], 4);
-        }
+        for (int k = 0; k < g_exp_n; ++k)
+            if (readable(g_exp_cars[k], kSnap)) for (int i = 0; i < e.n; ++i) memcpy(g_exp_cars[k] + e.p[i].off, &g_exp_saved[k][i], 4);
         char b[160];
-        snprintf(b, sizeof b, "rev probe: press %d done: the engine step ran %llu times for the garage car, highest revs %.1f",
+        snprintf(b, sizeof b, "rev probe: press %d done: the engine step ran %llu times for the cars, highest revs %.1f",
                  g_exp + 1, static_cast<unsigned long long>(g_gcalls.load()), static_cast<double>(g_gpeak.load()));
         plog(b);
         g_exp_on = false;
+        g_exp_n = 0;
         for (void*& l : g_live) l = nullptr;
         ++g_exp;
     }
@@ -184,6 +195,7 @@ uint64_t detour_rel(void* self) {
             plog(b);
         }
     }
+    if (g_exp_on && g_exp_n < kMaxExp && not_driving()) exp_apply(car);   // the shown car may not be one we captured
     if (g_exp_on && is_live(car) && readable(car, 0x40)) {   // hold the car in place: no velocity, the wheels and the engine do their thing
         float* v = reinterpret_cast<float*>(car + 0x10);
         v[0] = v[1] = v[2] = 0.0f;
