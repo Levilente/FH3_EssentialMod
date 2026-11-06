@@ -596,7 +596,12 @@ void* detour_add(ARGS12) {
             const long gid = g_active.load();
             u->pend_id.store(static_cast<long>(static_cast<int>(b)));
             u->pend.store(st != get_stage(u, gid, 0));   // choosing the stage the car has is no change
-            if (is_owned(u, gid, st)) return nullptr;     // owned (stock always): installed with the setup, never bought again
+            static std::atomic<int> add_logged{0};
+            if (add_logged.fetch_add(1) < 200)
+                plog("upgrades: basket add of " + u->id + " stage " + std::to_string(st) + " (fitted " + std::to_string(get_stage(u, gid, 0)) +
+                     ", " + (is_owned(u, gid, st) ? "owned" : "not owned") + ", waiting " + (u->pend.load() ? "yes" : "no") + ")");
+            // Owned stages go into the game's basket like any owned part: at 0 CR, replacing what was waiting for that slot
+            // (the game's rows say they are owned, see ensure_owned), and the commit below fits them without a charge.
         }
     }
     return g_orig_add(PASS12);
@@ -639,6 +644,13 @@ int buy_guarded(void* sess, int gid, const Upgrade* u, int stage) {
 }
 
 void* detour_commit(ARGS12) {
+    {
+        static std::atomic<int> cm_logged{0};
+        bool any = false;
+        const int nn = g_count.load();
+        for (int q = 0; q < nn; ++q) any |= g_up[q]->pend.load();
+        if (cm_logged.fetch_add(1) < 100) plog(std::string("upgrades: shop commit (a stage was waiting: ") + (any ? "yes" : "no") + ", flag " + std::to_string(static_cast<int>(b & 0xFF)) + ")");
+    }
     std::wstring short_msg;   // an upgrade of ours that the credits didn't cover: said in a message box after the commit
     void* short_page = nullptr;
     const int n = g_count.load();
@@ -704,6 +716,12 @@ void* detour_afford(ARGS12) {
 
 void* detour_abandon(ARGS12) {
     const int n = g_count.load();
+    {
+        static std::atomic<int> ab_logged{0};
+        bool any = false;
+        for (int q = 0; q < n; ++q) any |= g_up[q]->pend.load();
+        if (ab_logged.fetch_add(1) < 100) plog(std::string("upgrades: shop setup abandoned (a stage was waiting: ") + (any ? "yes" : "no") + ")");
+    }
     for (int q = 0; q < n; ++q) g_up[q]->pend.store(false);
     clear_previews();
     return g_orig_abandon(PASS12);

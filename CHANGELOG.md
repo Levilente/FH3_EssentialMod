@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.7
+
+- **Upgrade bridge: owned stages go into the basket at 0 CR, like the game's own owned parts.** Choosing a stage you already own (or Stock) used to skip the basket, so what was waiting for that slot (say Stage 3) stayed in it and Install Parts did nothing. The stage now replaces the waiting one in the basket and is fitted at the install without a charge.
+- Basket, commit and abandon steps are logged (first 100-200 events) to make shop problems easier to trace.
+
 ## 1.0.6
 
 - **Upgrade bridge: the game's own credit check now counts bridge upgrades.** The shop's affordability check (`0x16CA9F0`, total cost against Credits) summed only the game's parts, so a mod upgrade you couldn't pay for slipped through. The platform adds the price of the bridge stages in the basket to that total, so the game itself says "You do not have enough Credits" and shows the right total in the "install?" prompt: one check for everything in the basket. The message box from 1.0.5 stays only as a fallback.
