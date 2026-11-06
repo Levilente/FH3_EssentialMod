@@ -51,7 +51,7 @@ set_source_files_properties(${_sqlite_src} PROPERTIES
     COMPILE_DEFINITIONS "SQLITE_OMIT_LOAD_EXTENSION;SQLITE_DEFAULT_MEMSTATUS=0")
 
 add_library(fh3mod_platform SHARED src/platform.cpp src/strings.cpp src/updates.cpp src/files.cpp
-            src/database.cpp src/media_overrides.cpp src/ui_patches.cpp src/mods_page.cpp src/intro_skip.cpp src/titles.cpp src/session.cpp src/hotkeys.cpp src/commands.cpp src/crash.cpp src/hooks.cpp src/upgrades.cpp src/units.cpp src/sellcar.cpp src/settings.cpp src/version.rc ${_minhook_src} ${_sqlite_src})
+            src/database.cpp src/media_overrides.cpp src/ui_patches.cpp src/mods_page.cpp src/intro_skip.cpp src/titles.cpp src/session.cpp src/hotkeys.cpp src/commands.cpp src/crash.cpp src/hooks.cpp src/upgrades.cpp src/units.cpp src/rev.cpp src/sellcar.cpp src/settings.cpp src/version.rc ${_minhook_src} ${_sqlite_src})
 target_include_directories(fh3mod_platform PRIVATE third_party/minhook/include ${_minhook} third_party/sqlite)
 if(NOT MSVC)
     # InterlockedCompareExchange128, for rewriting call sites atomically.

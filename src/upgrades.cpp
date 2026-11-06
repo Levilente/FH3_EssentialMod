@@ -19,6 +19,8 @@
 #include <thread>
 
 namespace fh3platform {
+std::atomic<uint64_t> g_shop_tick{0};   // the last time the upgrade shop touched the car (cursor move, setup, part list)
+uint64_t upgrades_shop_tick() { return g_shop_tick.load(); }
 namespace {
 
 constexpr int kMaxUpgrades = 8;
@@ -472,6 +474,7 @@ int detour_memcmp(const void* x, const void* y, size_t n) {
 QueryBuildB g_orig_show = nullptr;
 std::atomic<int> g_show_logged{0};
 void* detour_show(uint64_t car, uint64_t e, uint64_t part, uint64_t d, uint64_t flag, uint64_t g, uint64_t h, uint64_t i, uint64_t j) {
+    if (flag & 0xFF) g_shop_tick.store(GetTickCount64());
     const bool shop = (flag & 0xFF) != 0;
     const int en    = static_cast<int>(e);
     if (shop) {
@@ -529,6 +532,7 @@ void* detour_rebuild(void* car, void* x, int y) {
 QueryBuildB g_orig_setup = nullptr;
 std::atomic<int> g_setup_logged{0};
 void* detour_setup(uint64_t car, uint64_t set, uint64_t c, uint64_t d, uint64_t e, uint64_t f, uint64_t g, uint64_t h, uint64_t i) {
+    g_shop_tick.store(GetTickCount64());
     bool had = false;
     const int n = g_count.load();
     for (int q = 0; q < n; ++q) had |= g_up[q]->preview.load() >= 0;
@@ -551,6 +555,7 @@ void* detour_setup(uint64_t car, uint64_t set, uint64_t c, uint64_t d, uint64_t 
 // its table). An upgrade that asks for the camera of a game part gets that part's enum here.
 QueryBuildB g_orig_camera = nullptr;
 void* detour_camera(uint64_t self, uint64_t area, uint64_t e, uint64_t d, uint64_t f, uint64_t g, uint64_t h, uint64_t i, uint64_t j) {
+    g_shop_tick.store(GetTickCount64());
     const int en = static_cast<int>(e);
     if (en > 43) {
         const int n = g_count.load();
