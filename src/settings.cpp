@@ -1834,19 +1834,39 @@ bool write_units_page() {
 // that isn't shown for the car being tuned leaves no gap. If the file isn't as expected the game's own is used.
 std::string tune_row_xaml(std::size_t i, const TuneRow& r) {
     const std::string n = std::to_string(i);
+    // The label may be "Header|Row label (unit)": the header band above the row (like RIDE HEIGHT / LOW / HIGH / cm) gets the part
+    // before the bar in capitals, the row the part after it; a trailing "(unit)" goes to the band's right end. Without a bar the
+    // header and the row share the text.
+    std::string head = r.label, row = r.label, unit;
+    const std::size_t bar = r.label.find('|');
+    if (bar != std::string::npos) { head = r.label.substr(0, bar); row = r.label.substr(bar + 1); }
+    const std::size_t lp = row.rfind(" (");
+    if (lp != std::string::npos && !row.empty() && row.back() == ')') { unit = row.substr(lp + 2, row.size() - lp - 3); row = row.substr(0, lp); if (bar == std::string::npos) head = row; }
+    for (char& c : head) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    auto fmt = [&](float f) { char b[32]; std::snprintf(b, sizeof b, "%.*f", r.decimals, static_cast<double>(f)); return std::string(b); };
+    const std::string vis = "Visibility=\"{Binding Tuning.FH3Mod_TuneVis_" + n + ", Converter={StaticResource FH3Mod_TuneShow}}\"";
     std::string x;
+    x += "                                <ListBoxItem Style=\"{StaticResource A_Style_ListBoxItem_List_Tuning}\" Focusable=\"False\"\r\n"
+         "                                             " + vis + ">\r\n"
+         "                                <ItemsControl Style=\"{StaticResource A_Style_ItemsControl_1x3_TuningSpaced_Header}\">\r\n"
+         "                                    <local:FZTextBlock Style=\"{StaticResource A_Style_FZTextBlock_Tune_ItemTitle}\" Text=\"" + xml_escape(head) + "\" HorizontalAlignment=\"Left\" Grid.Column=\"0\" />\r\n"
+         "                                    <local:FZTextBlock Style=\"{StaticResource A_Style_FZTextBlock_Tune_ItemTitle}\" Text=\"" + fmt(r.fmin) + "\" HorizontalAlignment=\"Left\" Grid.Column=\"1\" />\r\n"
+         "                                    <local:FZTextBlock Style=\"{StaticResource A_Style_FZTextBlock_Tune_ItemTitle}\" Text=\"" + fmt(r.fmax) + "\" HorizontalAlignment=\"Right\" Grid.Column=\"1\" />\r\n"
+         "                                    <local:FZTextBlock Style=\"{StaticResource A_Style_FZTextBlock_Tune_ItemTitle}\" Text=\"" + xml_escape(unit) + "\" HorizontalAlignment=\"Right\" Grid.Column=\"2\" />\r\n"
+         "                                </ItemsControl>\r\n"
+         "                                </ListBoxItem>\r\n";
     x += "                                <ListBoxItem Style=\"{StaticResource A_Style_ListBoxItem_List_Tuning}\" Tag=\"" + xml_escape(r.help) + "\"\r\n"
-         "                                             Visibility=\"{Binding Tuning.FH3Mod_TuneVis_" + n + ", Converter={StaticResource FH3Mod_TuneShow}}\">\r\n"
+         "                                             " + vis + ">\r\n"
          "                                <ItemsControl Style=\"{StaticResource A_Style_ItemsControl_1x3_TuningSpaced}\" Tag=\"" + xml_escape(r.help) + "\">\r\n"
          "                                    <local:FZTextBlock Style=\"{StaticResource A_Style_FZTextBlock_Tune_ItemLabel}\"\r\n"
-         "                                                        Text=\"" + xml_escape(r.label) + "\"\r\n"
+         "                                                        Text=\"" + xml_escape(row) + "\"\r\n"
          "                                                        HorizontalAlignment=\"Left\"\r\n"
          "                                                        Grid.Column=\"0\" />\r\n"
          "                                    <Grid Grid.Column=\"1\">\r\n"
-         "                                        <Slider x:Name=\"FH3Mod_Tune_Value_" + n + "\" Value=\"{Binding Tuning.FH3Mod_Tune_" + n + ", Mode=TwoWay}\" Minimum=\"" + num(r.fmin) +
-         "\" Maximum=\"" + num(r.fmax) + "\" LargeChange=\"" + num(r.fstep) + "\" SmallChange=\"" + num(r.fstep) + "\" Style=\"{StaticResource A_Style_Slider_Tuning_Adjust}\"/>\r\n"
-         "                                        <Slider Value=\"{Binding Tuning.FH3Mod_Tune_" + n + ", Mode=TwoWay}\" Minimum=\"" + num(r.fmin) + "\" Maximum=\"" + num(r.fmax) +
-         "\" LargeChange=\"" + num(r.fstep) + "\" SmallChange=\"" + num(r.fstep) + "\" Style=\"{StaticResource A_Style_Slider_Tuning_Adjust_ThumbOnly}\"/>\r\n"
+         "                                        <Slider x:Name=\"FH3Mod_Tune_Value_" + n + "\" Minimum=\"" + num(r.fmin) + "\" Maximum=\"" + num(r.fmax) + "\" LargeChange=\"" + num(r.fstep) +
+         "\" SmallChange=\"" + num(r.fstep) + "\" Value=\"{Binding Tuning.FH3Mod_Tune_" + n + ", Mode=TwoWay}\" Style=\"{StaticResource A_Style_Slider_Tuning_Adjust}\"/>\r\n"
+         "                                        <Slider Minimum=\"" + num(r.fmin) + "\" Maximum=\"" + num(r.fmax) + "\" LargeChange=\"" + num(r.fstep) + "\" SmallChange=\"" + num(r.fstep) +
+         "\" Value=\"{Binding Value, ElementName=FH3Mod_Tune_Value_" + n + ", Mode=TwoWay}\" Style=\"{StaticResource A_Style_Slider_Tuning_Adjust_ThumbOnly}\"/>\r\n"
          "                                    </Grid>\r\n"
          "                                    <local:FZTextBlock Style=\"{StaticResource A_Style_FZTextBlock_Tune_ItemValue}\"\r\n"
          "                                                        Text=\"{Binding Tuning.FH3Mod_Tune_" + n + ", Converter={StaticResource FH3Mod_TuneNum_" + n + "}}\"\r\n"

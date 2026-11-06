@@ -606,7 +606,7 @@ typedef struct FH3ModApi {
 struct FH3TuningRow {
     uint32_t size;                 /* sizeof(FH3TuningRow) */
     const char* key;               /* unique within your mod: letters, digits and '_' */
-    const char* label;             /* UTF-8, at the left of the row: "Airride drop (cm)" */
+    const char* label;             /* UTF-8, at the left of the row: "Airride drop (cm)"; "Airride|Drop (cm)" = header band "AIRRIDE", row "Drop", unit cm */
     const char* help;              /* UTF-8, the description shown while the row is selected; may be NULL */
     float min, max, step;          /* the slider's range and step */
     int decimals;                  /* digits after the point in the number at the right */
