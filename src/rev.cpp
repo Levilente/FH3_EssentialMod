@@ -98,9 +98,69 @@ void log_diff() {
     }
 }
 
+
+// Experiments on the garage cars: each press of the trigger in the shop sets one group of the flags found above (and puts
+// them back when the trigger is released); the log says what the engine step did meanwhile.
+struct Poke { int off; uint32_t val; };
+const Poke kExp0[] = {{0x4990, 0}};
+const Poke kExp1[] = {{0x160, 4}};
+const Poke kExp2[] = {{0x4990, 0}, {0x160, 4}};
+const Poke kExp3[] = {{0x1724, 1}, {0x19FC, 1}, {0x1D88, 1}, {0x1D8C, 2}, {0x3218, 1}, {0x321C, 2}, {0x46A8, 1}, {0x46AC, 2}};
+const Poke kExp4[] = {{0x4990, 0}, {0x160, 4}, {0x1724, 1}, {0x19FC, 1}, {0x1D88, 1}, {0x1D8C, 2}, {0x3218, 1}, {0x321C, 2}, {0x46A8, 1}, {0x46AC, 2}};
+struct ExpDef { const Poke* p; int n; const char* name; };
+const ExpDef kExps[] = {{kExp0, 1, "+0x4990=0"}, {kExp1, 1, "+0x160=4"}, {kExp2, 2, "+0x4990=0, +0x160=4"},
+                        {kExp3, 8, "the six pairs (+0x1724 ... +0x46AC)"}, {kExp4, 10, "all of them"}};
+constexpr int kNExp = 5;
+int g_exp = 0;                       // next experiment
+bool g_exp_on = false;
+uint32_t g_saved[3][16];
+std::atomic<uint64_t> g_gcalls{0};
+std::atomic<float> g_gpeak{0.0f};
+uint64_t g_exp_calls0 = 0;
+
+bool is_garage_car(const void* c) {
+    for (int k = 0; k < g_n_gar.load(); ++k) if (g_gar_car[k] == c) return true;
+    return false;
+}
+
+void exp_step(bool shop_in_use) {
+    const float rt = trigger();
+    if (!g_exp_on && rt > 0.8f && shop_in_use && g_n_gar.load() > 0) {
+        const ExpDef& e = kExps[g_exp % kNExp];
+        for (int k = 0; k < g_n_gar.load(); ++k) {
+            char* c = static_cast<char*>(g_gar_car[k]);
+            if (!readable(c, kSnap)) continue;
+            for (int i = 0; i < e.n; ++i) {
+                memcpy(&g_saved[k][i], c + e.p[i].off, 4);
+                memcpy(c + e.p[i].off, &e.p[i].val, 4);
+            }
+        }
+        g_exp_on = true;
+        g_gcalls = 0;
+        g_gpeak = 0.0f;
+        char b[160];
+        snprintf(b, sizeof b, "rev probe: press %d: experiment %d (%s) applied", g_exp + 1, g_exp % kNExp, e.name);
+        plog(b);
+    } else if (g_exp_on && rt < 0.2f) {
+        const ExpDef& e = kExps[g_exp % kNExp];
+        for (int k = 0; k < g_n_gar.load(); ++k) {
+            char* c = static_cast<char*>(g_gar_car[k]);
+            if (!readable(c, kSnap)) continue;
+            for (int i = 0; i < e.n; ++i) memcpy(c + e.p[i].off, &g_saved[k][i], 4);
+        }
+        char b[160];
+        snprintf(b, sizeof b, "rev probe: press %d done: the engine step ran %llu times for the garage car, highest revs %.1f",
+                 g_exp + 1, static_cast<unsigned long long>(g_gcalls.load()), static_cast<double>(g_gpeak.load()));
+        plog(b);
+        g_exp_on = false;
+        ++g_exp;
+    }
+}
+
 uint64_t detour_rel(void* self) {
     char* car = static_cast<char*>(self) - kCarSecondary;
     const uint64_t shop = upgrades_shop_tick();
+    if (!g_exp_on && g_n_gar.load() > 0 && (!shop || GetTickCount64() - shop > 10000)) g_n_gar.store(0);   // the garage cars are gone: no stale pointers
     if (g_probe.load() && shop && GetTickCount64() - shop < 2500 && g_n_gar.load() < 3) {
         bool known = false;
         for (int k = 0; k < g_n_gar.load(); ++k) known |= g_gar_car[k] == car;
@@ -114,12 +174,21 @@ uint64_t detour_rel(void* self) {
             plog(b);
         }
     }
-    if (g_have_drv.load() && g_n_gar.load() > 0) log_diff();
+    if (g_have_drv.load() && g_n_gar.load() > 0) {
+        log_diff();
+        exp_step(shop && GetTickCount64() - shop < 8000);
+    }
     return g_orig_rel(self);
 }
 
 bool detour_torque(void* self, float rpm, float throttle, void* r8, void* r9, uint64_t a5, uint64_t a6, uint64_t a7, uint64_t a8) {
     g_calls.fetch_add(1);
+    if (g_exp_on && is_garage_car(self)) {
+        g_gcalls.fetch_add(1);
+        if (rpm > g_gpeak.load()) g_gpeak = rpm;
+        const float rt = trigger();
+        if (rt > throttle) throttle = rt;
+    }
     if (g_probe.load() && !g_have_drv.load()) {
         const uint64_t shop = upgrades_shop_tick();
         if (throttle > 0.8f && trigger() > 0.8f && (!shop || GetTickCount64() - shop > 20000) && readable(self, kSnap)) {
