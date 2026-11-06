@@ -25,6 +25,7 @@ constexpr int kMaxUpgrades = 8;
 constexpr int kMaxStages   = 10;
 constexpr int kFirstEnum   = 47;
 constexpr long kPartBase   = 900470;
+constexpr unsigned long long kPreviewMs = 300;   // how long after a cursor move upgrade_stage answers with the previewed stage
 constexpr uint32_t kUpgradesHash     = 0x968719E9u;
 constexpr uint32_t kUpgradeTypesHash = 0x07710821u;
 
@@ -48,6 +49,7 @@ struct Upgrade {
     std::atomic<bool> pend{false};
     std::atomic<int> preview{-1};       // the stage the shop shows on the car right now (-1: none), for upgrade_stage
     std::atomic<long> preview_gid{0};
+    std::atomic<unsigned long long> preview_until{0};   // GetTickCount64 until which the preview applies
     int penum() const { return kFirstEnum + slot; }
     long part(int stage) const { return kPartBase + 10L * slot + stage; }
     int count() const { return static_cast<int>(stages.size()); }
@@ -481,6 +483,7 @@ void* detour_show(uint64_t car, uint64_t e, uint64_t part, uint64_t d, uint64_t 
                 const long s = static_cast<long>(static_cast<int>(part)) - u->part(0);
                 if (s >= 0 && s < u->count()) {
                     u->preview_gid.store(static_cast<long>(g_active.load()));
+                    u->preview_until.store(GetTickCount64() + kPreviewMs);
                     u->preview.store(static_cast<int>(s));
                 } else {
                     u->preview.store(-1);
@@ -900,7 +903,11 @@ int upgrades_stage(int handle, int32_t garage) {
     if (!u) return 0;
     const long gid = garage > 0 ? garage : static_cast<long>(g_active.load());
     // In the shop, the stage being looked at, so a mod can show it on the car before it is bought.
-    if (const int pv = u->preview.load(); pv >= 0 && pv < u->count() && u->preview_gid.load() == gid) return pv;
+    // Only for the rebuild the show step starts (the game builds the car within ~50 ms of it). When the cursor leaves the
+    // list, the game rebuilds the car from a part set that never changed for our parts, with no call we can see, so
+    // anything later than that gets the fitted stage again.
+    if (const int pv = u->preview.load(); pv >= 0 && pv < u->count() && u->preview_gid.load() == gid && GetTickCount64() <= u->preview_until.load())
+        return pv;
     return get_stage(u, gid, 0);
 }
 uint32_t upgrades_active_garage() { return g_active.load(); }

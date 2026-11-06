@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.9
+
+- Shop preview: `upgrade_stage` answers with the previewed stage only for 300 ms after the cursor moved onto it, which covers the car rebuild the shop starts then. Backing out of the list rebuilds the car with no call the platform sees (the game's part set never changed for a bridge part), so 1.0.8 still left the preview on the car; now that rebuild gets the fitted stage.
+
 ## 1.0.8
 
 - Shop preview: the previewed stage no longer stays on the car after backing out of the list or leaving the garage. The shop puts a setup on its car (`game+0x38BCD0`) when it enters or leaves a list and before each cursor move; the preview ends there, and the show step sets it again while the cursor is on a stage.
