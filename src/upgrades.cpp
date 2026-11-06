@@ -687,6 +687,8 @@ __asm__(".text\n.globl fh3_basket_stub\nfh3_basket_stub:\n"
 // the player's car, from the HUD controller (defined below the shop code)
 void* detour_loader(ARGS12);
 extern Fn12 g_orig_loader;
+void* detour_carbuild(ARGS12);
+extern Fn12 g_orig_carbuild;
 uint64_t detour_hud(void* c, void* a, void* b, void* d);
 typedef uint64_t (*HudCtrlFn)(void*, void*, void*, void*);
 HudCtrlFn g_orig_hud = nullptr;
@@ -885,6 +887,7 @@ void install_hooks() {
         {0x16F7ED0, reinterpret_cast<void*>(detour_camera), "upgrades: shop camera for a part", reinterpret_cast<void**>(&g_orig_camera)},
     };
     for (const H& h : hooks) hook_game_function(h.rva, h.detour, h.what, h.orig);
+    hook_game_function_shared(0x189BCC0, reinterpret_cast<void*>(detour_carbuild), "PROBE: in-Car build", reinterpret_cast<void**>(&g_orig_carbuild));
     hook_game_function_shared(0x19E6A80, reinterpret_cast<void*>(detour_loader), "PROBE: central car loader", reinterpret_cast<void**>(&g_orig_loader));
     hook_game_function_shared(0xB26690, reinterpret_cast<void*>(detour_hud), "upgrades: the player's car (HUD controller)", reinterpret_cast<void**>(&g_orig_hud));
     install_basket_patch(reinterpret_cast<uintptr_t>(find_game()));
@@ -1146,6 +1149,29 @@ void* detour_loader(ARGS12) {
     return r;
 }
 
+// PROBE 4: the in-Car build (game+0x189BCC0: rcx = Car, rdx = request, r8b, r9b), which runs the loader on Car+0x140.
+Fn12 g_orig_carbuild = nullptr;
+void* detour_carbuild(uint64_t a, uint64_t b_, uint64_t c, uint64_t d, uint64_t e, uint64_t f, uint64_t g_, uint64_t h, uint64_t i, uint64_t j, uint64_t k, uint64_t l) {
+    if (g_probe_lines.fetch_add(1) < 600) {
+        char* g = game();
+        const uintptr_t ra = reinterpret_cast<uintptr_t>(__builtin_return_address(0));
+        std::string line;
+        char b[64];
+        snprintf(b, sizeof b, "PROBE carbuild: Car %p req %p r8 %u r9 %u from ", reinterpret_cast<void*>(a), reinterpret_cast<void*>(b_), (unsigned)(c & 0xFF), (unsigned)(d & 0xFF));
+        line = b;
+        if (g && ra > reinterpret_cast<uintptr_t>(g)) { snprintf(b, sizeof b, "g+%llX", (unsigned long long)(ra - reinterpret_cast<uintptr_t>(g))); line += b; }
+        auto dump = [&](const char* name, uintptr_t p, size_t n) {
+            line += std::string(" | ") + name + ":";
+            if (!p || !readable(reinterpret_cast<void*>(p), n)) { line += " ?"; return; }
+            for (size_t o = 0; o < n; o += 8) { snprintf(b, sizeof b, " %llX", (unsigned long long)*reinterpret_cast<uint64_t*>(p + o)); line += b; }
+        };
+        dump("req", b_, 0x80);
+        dump("car", a, 0x140);
+        plog(line);
+    }
+    return g_orig_carbuild(a, b_, c, d, e, f, g_, h, i, j, k, l);
+}
+
 void probe_hud_car(char* car, char* spec) {
     static std::atomic<char*> last_car{nullptr}, last_spec{nullptr};
     if (last_car.exchange(car) == car && last_spec.exchange(spec) == spec) return;
@@ -1211,24 +1237,6 @@ uint64_t detour_hud(void* c, void* a, void* b, void* d) {
     char* spec = *reinterpret_cast<char**>(car + 0x110);
     if (!spec || !readable(spec + 0x30, 4)) return r;
     probe_hud_car(car, spec);
-    {   // PROBE 3: does a change of the loader's spec inside the Car (+0x140) after the car is built reach the car?
-        // 12 s after the player's Car is first seen, its track (spec +0xF4 / +0xF8) gets 15 cm wider, once.
-        static char* seen_car = nullptr;
-        static uint64_t seen_at = 0;
-        static char* done_car = nullptr;
-        if (car != seen_car) { seen_car = car; seen_at = now; }
-        if (done_car != car && now - seen_at > 12000 && readable(car + 0x140 + 0xF8, 4)) {
-            done_car = car;
-            float* f = reinterpret_cast<float*>(car + 0x140 + 0xF4);
-            float* rr = reinterpret_cast<float*>(car + 0x140 + 0xF8);
-            const float bf = *f, br = *rr;
-            *f += 0.15f;
-            *rr += 0.15f;
-            char line[200];
-            snprintf(line, sizeof line, "PROBE 3: the player's Car %p: track in its spec (+0x140) %.3f/%.3f -> %.3f/%.3f (15 cm wider, live)", car, bf, br, *f, *rr);
-            plog(line);
-        }
-    }
     driven_car_seen(*reinterpret_cast<int32_t*>(spec + 0x30));
     return r;
 }
