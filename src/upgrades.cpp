@@ -1096,8 +1096,8 @@ bool build_is_players(long gid, long model) {
     static std::atomic<int> lines{0};
     if (lines.fetch_add(1) < 200) {
         char b[220];
-        snprintf(b, sizeof b, "upgrades: car %p (model %ld) is built: %s (%s)", static_cast<void*>(c), model, mine ? "the player's, garage car " : "someone else's, not garage car ", why);
-        plog(std::string(b) + (mine ? std::to_string(gid) : std::to_string(gid)));
+        snprintf(b, sizeof b, "upgrades: car %p (model %ld) is built: %s garage car %ld (%s)", static_cast<void*>(c), model, mine ? "the player's," : "someone else's, not", gid, why);
+        plog(b);
     }
     return mine;
 }

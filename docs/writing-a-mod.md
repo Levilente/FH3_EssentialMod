@@ -129,11 +129,13 @@ If you can't use the platform's hooks for something (a patch in the middle of a 
 
 ## A garage upgrade that changes the car
 
+> The full guide for mods that change the player's car (upgrades, build-time changes, effects while driving, what the platform decides for you, a test checklist) is [car-mods.md](car-mods.md).
+
 The upgrade bridge ([api.md](api.md#custom-upgrades-the-upgrade-bridge-api-11)) gives your mod a real upgrade under Garage > Upgrades: shop, basket, price, purchase and the per-car stage are the platform's job. What your mod adds is the effect. The pattern that works (and shows the stage on hover in the shop, before it is bought):
 
 1. In `fh3mod_init`, call `register_upgrade` once per upgrade and keep the handle. Stage 0 is stock and fitted on every car.
 2. Find the place in the game's code where the car is built from its data (for a physical change, where the value you want to change is read or stored) and put a hook there (`hook_function`, or `hook_instruction` right after the store, API 7). Do this after `wait_for_code`.
-3. In the hook, ask `upgrade_stage(mod, handle, upgrade_active_garage())` and change the value by the stage. Check that the car being built is the one the stage is for (the game builds other cars too: showroom, traffic, opponents) - compare its model id with the one you stored for that garage.
+3. In the hook, ask `upgrade_stage_for_car(mod, handle, car_id)` with the Data_Car id of the car being built (API 14). The platform answers 0 for a car that isn't the player's (an AI car of the same model, a loaner) and the previewed stage in the shop. Don't compare models yourself. [car-mods.md](car-mods.md) explains what the platform does and how to test it.
 4. Don't keep the stage from `on_stage` for this: the shop preview doesn't call it. Use `on_stage` for things outside the car's data (a HUD, a sound, a boost while driving).
 5. Never write your part into the game's part set or tuning (enums 0 to 42 are the game's). The platform keeps bridge parts out of it.
 6. Put switches in your ini for each hook (`Apply...=1`), so a player can turn one off when it misbehaves; it is the quickest way to find which hook causes a problem.

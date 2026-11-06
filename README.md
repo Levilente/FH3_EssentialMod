@@ -31,10 +31,10 @@ on start, and it loads every mod DLL in the `fh3-mods` folder.
 
 **For mod makers**
 
-- A C/C++ API (`include/fh3mod.h`, API version 12, documented in [`docs/api.md`](docs/api.md)): game-text edits, game-file overrides, database patches
+- A C/C++ API (`include/fh3mod.h`, API version 14, documented in [`docs/api.md`](docs/api.md)): game-text edits, game-file overrides, database patches
   (`add_sql`), string-table keys for FH3's hashed tables, Mods-page rows (On/Off, sliders, choices), hooks and byte patches, hotkeys, commands
   (`fh3mod.exe`), interfaces between mods, sessions, save snapshots, and the **upgrade bridge** (`register_upgrade`).
-- A mod is one DLL; [`docs/writing-a-mod.md`](docs/writing-a-mod.md) goes from an empty folder to a release. [`examples/hello_mod`](examples/hello_mod/hello_mod.cpp) is the starting point.
+- A mod is one DLL; [`docs/writing-a-mod.md`](docs/writing-a-mod.md) goes from an empty folder to a release. Mods that change the player's car (upgrades, build-time changes) should read [`docs/car-mods.md`](docs/car-mods.md): the platform tells the player's car from loaners and AI cars of the same model, so mods don't have to. [`examples/hello_mod`](examples/hello_mod/hello_mod.cpp) is the starting point.
 - What is known about the game's code: [`docs/fh3-game-notes.md`](docs/fh3-game-notes.md) and [`include/fh3game.h`](include/fh3game.h).
 
 ## Requirements
