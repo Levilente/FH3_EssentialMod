@@ -796,7 +796,13 @@ Stage prices are charged by the platform when the player confirms the setup in t
 
 ### Shop preview (platform 1.0.2)
 
-While the player looks at a stage of your upgrade in the shop (moves the cursor onto it), `upgrade_stage` returns **that** stage for the car, and the shop rebuilds the car the same way it does for its own parts. So an upgrade whose effect is built into the car shows on hover, before it is bought, with no extra code. The preview ends when the stage is bought, when the shop is left without buying (Abandon), or when another car is driven; from then on `upgrade_stage` gives the fitted stage again.
+While the player looks at a stage of your upgrade in the shop (moves the cursor onto it), `upgrade_stage` returns **that** stage for the car, and the shop rebuilds the car the same way it does for its own parts. So an upgrade whose effect is built into the car shows on hover, before it is bought, with no extra code. What `upgrade_stage` returns for the car in the shop (platform 1.0.10):
+
+- **cursor on a stage**: that stage, for 300 ms after the cursor moved there. That covers the rebuild the shop starts on each cursor move (it comes within about 50 ms). Backing out of the list rebuilds the car with no call the platform can see, so a later rebuild must not get the hovered stage;
+- **a stage in the basket**: that stage, until the setup is installed or abandoned, or another car is driven, like the game's own basket parts;
+- otherwise the fitted stage.
+
+So a mod should read `upgrade_stage` **inside** its car-building hook, at the moment of the build.
 
 For your upgrade to show on hover:
 
