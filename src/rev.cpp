@@ -1,5 +1,5 @@
 // Free revving in the garage's upgrade shop: hold the right trigger anywhere in Upgrades and the engine revs.
-// STATUS: experiment, off by default (platform-rev.ini [rev] Enabled=1). The engine torque step (RVA_TORQUE) is not
+// STATUS: research, off by default (platform-rev.ini [rev] Enabled=1 / Probe=1). Findings in docs/fh3-game-notes.md.
 // run for the garage car at all, so a raised throttle changes nothing there; see docs/fh3-game-notes.md.
 //
 // The shop's car is simulated like any other, but nothing drives it, so its throttle is 0. The engine's torque
@@ -78,7 +78,7 @@ std::atomic<int> g_n_gar{0};
 std::atomic<int> g_n_snap{0};   // snapshots taken (never reset)
 std::atomic<uint64_t> g_last_shop_logged{0};
 std::atomic<void*> g_drv_car{nullptr};
-std::atomic<int> g_probe{1};
+std::atomic<int> g_probe{0};
 using RelFn = uint64_t (*)(void*);
 RelFn g_orig_rel = nullptr;
 
@@ -243,7 +243,7 @@ void rev_start() {
     if (done.exchange(true)) return;
     const std::wstring ini = (azimuth_dir() / L"fh3-mods" / L"platform-rev.ini").wstring();
     g_enabled = static_cast<int>(GetPrivateProfileIntW(L"rev", L"Enabled", 0, ini.c_str()));
-    g_probe = static_cast<int>(GetPrivateProfileIntW(L"rev", L"Probe", 1, ini.c_str()));
+    g_probe = static_cast<int>(GetPrivateProfileIntW(L"rev", L"Probe", 0, ini.c_str()));
     if (!g_enabled.load() && !g_probe.load()) return;
     std::thread([] {
         char* base = nullptr;
