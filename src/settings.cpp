@@ -4756,7 +4756,6 @@ void settings_start(const FH3ModApi* api) {
     add_hub_rows();
     add_unit_rows();
     sellcar_start();
-    rev_start();
     g_written = true;
     if (game_mount().empty()) {
         slog("the game folder wasn't found; no Mods page");

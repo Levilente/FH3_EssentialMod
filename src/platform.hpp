@@ -107,10 +107,6 @@ int units_get(int which);
 void units_set(int which, int v);
 void units_start();
 
-// rev.cpp: free revving with the right trigger in the upgrade shop.
-void rev_start();
-uint64_t upgrades_shop_tick();
-
 // files.cpp: file overrides in Extra Options' mediaoverride folder.
 int set_file(FH3Mod* mod, const char* media_path, const void* data, std::size_t size);
 void clear_file(FH3Mod* mod, const char* media_path);
