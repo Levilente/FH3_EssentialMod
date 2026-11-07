@@ -893,6 +893,9 @@ void* detour_qb(uint64_t a, uint64_t e, uint64_t c, uint64_t d, uint64_t f, uint
 }
 
 void install_hooks() {
+    // A slow fh3mod_init (many decals, say) must not let the shop hooks and the save clean-up run before
+    // every mod has registered its upgrades: a car loaded in between would come up without them.
+    if (!wait_mods_ready(180000)) plog("upgrades: not every mod finished starting in 3 minutes; hooking the shop anyway");
     struct H { uint32_t rva; void* detour; const char* what; void** orig; };
     const H hooks[] = {
         {0x440C0, reinterpret_cast<void*>(detour_prepare), "upgrades: SQL prepare", reinterpret_cast<void**>(&g_orig_prepare)},

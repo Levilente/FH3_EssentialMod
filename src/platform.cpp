@@ -1347,6 +1347,10 @@ DWORD WINAPI load_mods(LPVOID) {
 
 } // namespace
 
+bool wait_mods_ready(uint32_t timeout_ms) {
+    return g_mods_ready && WaitForSingleObject(g_mods_ready, timeout_ms) == WAIT_OBJECT_0;
+}
+
 // ---- the MODS tab's list of mods -----------------------------------------------------
 //
 // fh3-mods\platform-disabled.txt lists the DLLs turned off on the MODS tab, one per line; the

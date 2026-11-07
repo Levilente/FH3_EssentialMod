@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1
+
+- **Custom upgrades could be missing after a slow start.** The shop hooks (and the save clean-up that runs through them) started as soon as the first mod registered an upgrade. When a mod listed earlier took long in `fh3mod_init` (a few hundred Livery Decals take about a minute), the mods after it, such as Nitro System II and Universal Wheel Spacers, registered only after the game had loaded the car, and their parts did nothing until the car was changed in the shop. The hooks now wait until every `fh3mod_init` has returned.
+
 ## 1.2.0
 
 - **Hot reload for mod makers** (API 16, off by default). With `fh3-mods\platform.ini` `[dev] HotReload=1` (and `ReloadKey=F9`), the platform loads every mod from a copy in `fh3-mods\.reload`, so a build can overwrite `fh3-mods\<Mod>.dll` while the game runs, and **F9** swaps in the mods whose DLL changed and which export `fh3mod_shutdown`: the platform calls it (8 seconds, on its own thread), switches the mod's hooks off, loads the new copy and runs its `fh3mod_init` again. `register_mod` returns the same handle; `add_setting`, `add_hotkey`, `add_command`, `register_upgrade`, `add_tuning_row`, `add_page` and `add_title_entry` with a key that exists already swap the callbacks instead of adding a second entry; `add_sql` ignores a statement it already has. The old DLL stays loaded for good, so nothing can run into unmapped code. What the game reads once at startup (texts, files, SQL, a row's label, an upgrade's stages) is not applied again. `is_reloading()` tells the second start from the first. A beep says how it went; `platform.log` says why. Players never see any of it: with `HotReload=0` mods load from `fh3-mods` as before. See `docs/writing-a-mod.md`.
