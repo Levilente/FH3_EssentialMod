@@ -480,9 +480,10 @@ void hid_parse(const BYTE* b, DWORD n, bool bt, Virt& v) {
         if (!r2 && (b1 & 0x08)) v.rt = 255;
     }
     v.lx = st(x);
-    v.ly = static_cast<SHORT>(-st(y));
+    auto inv = [](SHORT a) { return static_cast<SHORT>(a == -32768 ? 32767 : -a); }; // -(-32768) doesn't fit a SHORT
+    v.ly = inv(st(y));
     v.rx = st(rx);
-    v.ry = static_cast<SHORT>(-st(ry));
+    v.ry = inv(st(ry));
     v.present = true;
 }
 
