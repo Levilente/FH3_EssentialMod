@@ -13,8 +13,8 @@
 // +0x1D4 the engine speed (rad/s), +0xAA8 the gear (low nibble), CCarDynamics+0x684 the engine's speed limit, +0x1748 the raw
 // throttle, +0x10 the velocity.
 //
-// USB only: over Bluetooth the controller has to be switched to its full reports, which changes the input the game and the
-// platform read, so it is left alone (the log says so). Close Steam's PlayStation controller support and DS4Windows while playing.
+// USB and Bluetooth. Over Bluetooth the first output report switches the controller to its full input reports (0x31); the platform
+// reads those for the mods itself. Close Steam's PlayStation controller support and DS4Windows while playing.
 #include "fh3mod.h"
 
 #include <windows.h>
@@ -54,6 +54,7 @@ std::atomic<bool> g_triggers{true};
 std::atomic<float> g_trig_strength{0.8f};  // 0..1
 std::atomic<bool> g_lights{true};
 std::atomic<bool> g_rev_lights{true};
+std::atomic<bool> g_bluetooth{true};
 bool g_verbose = false;
 int g_color[3] = {0, 90, 255};             // the light bar's colour at low revs
 
@@ -99,6 +100,7 @@ void load_config() {
     g_trig_strength.store(clampf(cfg_float(L"TriggerStrength", 0.8f), 0, 1));
     g_lights.store(cfg_float(L"LightBar", 1) != 0);
     g_rev_lights.store(cfg_float(L"RevLights", 1) != 0);
+    g_bluetooth.store(cfg_float(L"Bluetooth", 1) != 0);
     g_color[0] = static_cast<int>(clampf(cfg_float(L"ColorR", 0), 0, 255));
     g_color[1] = static_cast<int>(clampf(cfg_float(L"ColorG", 90), 0, 255));
     g_color[2] = static_cast<int>(clampf(cfg_float(L"ColorB", 255), 0, 255));
@@ -109,6 +111,7 @@ void on_toggle(void*, const char* key, int value) {
     if (!std::strcmp(key, "Enabled")) { g_enabled.store(value != 0); save_float(L"Enabled", static_cast<float>(value)); }
     else if (!std::strcmp(key, "Triggers")) { g_triggers.store(value != 0); save_float(L"Triggers", static_cast<float>(value)); }
     else if (!std::strcmp(key, "LightBar")) { g_lights.store(value != 0); save_float(L"LightBar", static_cast<float>(value)); }
+    else if (!std::strcmp(key, "Bluetooth")) { g_bluetooth.store(value != 0); save_float(L"Bluetooth", static_cast<float>(value)); }
     else if (!std::strcmp(key, "RevLights")) { g_rev_lights.store(value != 0); save_float(L"RevLights", static_cast<float>(value)); }
 }
 void on_slide(void*, const char* key, float value) {
@@ -235,6 +238,8 @@ struct Ds {
     HANDLE h = nullptr;
     USHORT outLen = 0, featLen = 0;
     bool v2 = false;
+    bool bt = false;
+    BYTE seq = 0;
     OVERLAPPED wr{};
 };
 Ds g_ds;
@@ -275,13 +280,18 @@ bool ds_open(Ds& d) {
                 if (HidD_GetAttributes(h, &a) && a.VendorID == kVid && (a.ProductID == kPid || a.ProductID == kPidEdge) && HidD_GetPreparsedData(h, &pp)) {
                     HIDP_CAPS caps{};
                     if (HidP_GetCaps(pp, &caps) == HIDP_STATUS_SUCCESS && caps.UsagePage == 1 && caps.Usage == 5) {
-                        if (caps.InputReportByteLength == 64 && caps.OutputReportByteLength >= 48) {
+                        const bool bt = caps.InputReportByteLength != 64;
+                        if (caps.OutputReportByteLength < (bt ? 78 : 48)) {
+                            std::snprintf(why, sizeof why, "the DualSense's output report is %u bytes: not supported", caps.OutputReportByteLength);
+                        } else if (bt && !g_bluetooth.load()) {
+                            std::snprintf(why, sizeof why, "the DualSense is on Bluetooth and Bluetooth effects are off (DualSense.ini Bluetooth=0)");
+                        } else {
                             d.h       = h;
+                            d.bt      = bt;
+                            d.seq     = 0;
                             d.outLen  = caps.OutputReportByteLength;
                             d.featLen = caps.FeatureReportByteLength;
                             ok = found = true;
-                        } else {
-                            std::snprintf(why, sizeof why, "the DualSense is on Bluetooth: not supported (use USB)");
                         }
                     }
                     HidD_FreePreparsedData(pp);
@@ -301,19 +311,19 @@ bool ds_open(Ds& d) {
     }
     std::snprintf(last_why, sizeof last_why, "?");
     d.wr.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    d.v2        = false;
+    d.v2        = true;   // modern firmware unless the report below says otherwise
     if (d.featLen && d.featLen <= 600) {   // the firmware report: rumble emulation v2 from update 0x0224 on
         BYTE feat[600] = {};
         feat[0]        = 0x20;
         if (HidD_GetFeature(d.h, feat, d.featLen)) {
             const unsigned update = static_cast<unsigned>(feat[44]) | (static_cast<unsigned>(feat[45]) << 8);
             d.v2                  = update >= 0x0224;
-            say("controller: DualSense over USB (firmware update %04X, rumble emulation v%d)", update, d.v2 ? 2 : 1);
+            say("controller: DualSense over %s (firmware update %04X, rumble emulation v%d)", d.bt ? "Bluetooth" : "USB", update, d.v2 ? 2 : 1);
         } else {
-            say("controller: DualSense over USB");
+            say("controller: DualSense over %s", d.bt ? "Bluetooth" : "USB");
         }
     } else {
-        say("controller: DualSense over USB");
+        say("controller: DualSense over %s", d.bt ? "Bluetooth" : "USB");
     }
     return true;
 }
@@ -327,11 +337,38 @@ void ds_close(Ds& d) {
     d.h  = nullptr;
 }
 
+uint32_t g_crc_table[256];
+void crc_init() {
+    for (uint32_t i = 0; i < 256; ++i) {
+        uint32_t c = i;
+        for (int k = 0; k < 8; ++k) c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+        g_crc_table[i] = c;
+    }
+}
+uint32_t crc32(uint32_t crc, const BYTE* p, size_t n) {
+    crc = ~crc;
+    while (n--) crc = g_crc_table[(crc ^ *p++) & 0xFF] ^ (crc >> 8);
+    return ~crc;
+}
+
 bool ds_write(Ds& d, const BYTE common[47]) {
     BYTE buf[128] = {};
     if (d.outLen > sizeof buf) return false;
-    buf[0] = 0x02;
-    std::memcpy(buf + 1, common, 47);
+    if (!d.bt) {
+        buf[0] = 0x02;
+        std::memcpy(buf + 1, common, 47);
+    } else {   // Bluetooth: report 0x31, a sequence, a tag, the same 47 bytes, a CRC (seed 0xA2 for outputs)
+        const BYTE seed = 0xA2;
+        buf[0] = 0x31;
+        buf[1] = static_cast<BYTE>((d.seq++ & 0x0F) << 4);
+        buf[2] = 0x10;
+        std::memcpy(buf + 3, common, 47);
+        const uint32_t crc = crc32(crc32(0, &seed, 1), buf, 74);
+        buf[74] = static_cast<BYTE>(crc);
+        buf[75] = static_cast<BYTE>(crc >> 8);
+        buf[76] = static_cast<BYTE>(crc >> 16);
+        buf[77] = static_cast<BYTE>(crc >> 24);
+    }
     ResetEvent(d.wr.hEvent);
     DWORD n = 0;
     if (!WriteFile(d.h, buf, d.outLen, nullptr, &d.wr)) {
@@ -540,13 +577,14 @@ FH3MOD_EXPORT int fh3mod_init(const FH3ModApi* api) {
     info.github_repo      = nullptr;
     info.platform_version = FH3MOD_PLATFORM_VERSION;
     info.check_updates    = 0;
-    info.description      = "DualSense (USB): rev-counter light bar and player lights, brake-pedal trigger, rev-limiter trigger vibration, engine hum, gear-change and impact rumble.";
+    info.description      = "DualSense (USB and Bluetooth): rev-counter light bar and player lights, brake-pedal trigger, rev-limiter trigger vibration, engine hum, gear-change and impact rumble.";
     info.offline_only     = 1;
     g_mod                 = api->register_mod(&info);
     if (!g_mod) return 1;
 
     g_cfg_path = std::wstring(api->azimuth_dir) + L"\\fh3-mods\\DualSense.ini";
     load_config();
+    crc_init();
 
     auto toggle = [&](const char* key, const char* label, const char* desc, bool on) {
         FH3Setting s{};
@@ -578,6 +616,7 @@ FH3MOD_EXPORT int fh3mod_init(const FH3ModApi* api) {
     slider("Rumble", "Rumble strength (%)", "The engine's hum, gear-change knocks and impacts in the controller's motors. 0 turns them off.", g_rumble.load(), 2.0f);
     toggle("Triggers", "Adaptive triggers", "L2 as a brake pedal, R2 vibrating on the rev limiter.", g_triggers.load());
     slider("TriggerStrength", "Trigger strength (%)", "How hard the trigger effects push.", g_trig_strength.load(), 1.0f);
+    toggle("Bluetooth", "Bluetooth effects", "Also over Bluetooth. The controller is switched to its full reports (the platform reads them for the mods). Turn off if the game loses the controller. Takes effect when the controller reconnects.", g_bluetooth.load());
     toggle("LightBar", "Lights", "The light bar goes red towards the redline.", g_lights.load());
     toggle("RevLights", "Rev counter on the player lights", "The five player lights count the revs.", g_rev_lights.load());
 

@@ -24,6 +24,9 @@
 
 #include "MinHook.h"
 
+#include <hidsdi.h>
+#include <setupapi.h>
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -63,7 +66,10 @@ struct Virt {
 };
 std::mutex g_vmu;
 Virt g_virt;
-std::atomic<bool> g_present{false};
+std::atomic<bool> g_present{false};     // the RawGameController pads
+std::atomic<bool> g_hid_present{false}; // a DualSense read directly (USB or Bluetooth)
+std::mutex g_hmu;
+Virt g_hid;
 
 // ---- WinRT by hand (no WinRT headers in MinGW) ----------------------------------------------------------------------
 using RoInitializeFn            = HRESULT(WINAPI*)(int);
@@ -369,12 +375,160 @@ DWORD WINAPI reader(LPVOID) {
         Virt v;
         for (Dev& d : g_devs) {
             if (!d.obj || d.skip) continue;
+            // a DualSense the direct reader has: its state there is the real one (over Bluetooth the Windows list goes stale)
+            if (d.sony && (d.pid == 0x0CE6 || d.pid == 0x0DF2) && g_hid_present.load(std::memory_order_relaxed)) continue;
             if (safe_read(d)) add_to(v, d);
         }
         std::scoped_lock lk{g_vmu};
         v.packet = g_virt.packet + 1;
         g_virt   = v;
         g_present.store(v.present, std::memory_order_relaxed);
+    }
+}
+
+
+// ---- a DualSense read straight from its HID device (USB and Bluetooth) -------------------------------------------------------
+// Over Bluetooth the controller sends the short report 0x01 until something asks for the full one (a program lighting it up,
+// FH2-Input, Steam); from then on it sends 0x31 only, and Windows' own gamepad list shows nothing of it. Reading the device
+// ourselves (a handle of its own: the game and every other program keep theirs) sees both, and USB too.
+bool is_ds(USHORT vid, USHORT pid) { return vid == 0x054C && (pid == 0x0CE6 || pid == 0x0DF2); }
+
+HANDLE hid_open(USHORT* in_len, bool* bt) {
+    GUID guid;
+    HidD_GetHidGuid(&guid);
+    HDEVINFO set = SetupDiGetClassDevsW(&guid, nullptr, nullptr, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+    if (set == INVALID_HANDLE_VALUE) return INVALID_HANDLE_VALUE;
+    SP_DEVICE_INTERFACE_DATA ifd{};
+    ifd.cbSize    = sizeof ifd;
+    HANDLE result = INVALID_HANDLE_VALUE;
+    for (DWORD i = 0; result == INVALID_HANDLE_VALUE && SetupDiEnumDeviceInterfaces(set, nullptr, &guid, i, &ifd); ++i) {
+        DWORD need = 0;
+        SetupDiGetDeviceInterfaceDetailW(set, &ifd, nullptr, 0, &need, nullptr);
+        std::vector<char> mem(need + 16);
+        auto* det   = reinterpret_cast<SP_DEVICE_INTERFACE_DETAIL_DATA_W*>(mem.data());
+        det->cbSize = sizeof *det;
+        if (!SetupDiGetDeviceInterfaceDetailW(set, &ifd, det, need, nullptr, nullptr)) continue;
+        std::wstring path = det->DevicePath;
+        std::transform(path.begin(), path.end(), path.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+        if (path.find(L"054c") == std::wstring::npos) continue;
+        HANDLE h = CreateFileW(det->DevicePath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
+        if (h == INVALID_HANDLE_VALUE) continue;
+        HIDD_ATTRIBUTES a{};
+        a.Size = sizeof a;
+        PHIDP_PREPARSED_DATA pp = nullptr;
+        bool ok                 = false;
+        if (HidD_GetAttributes(h, &a) && is_ds(a.VendorID, a.ProductID) && HidD_GetPreparsedData(h, &pp)) {
+            HIDP_CAPS caps{};
+            if (HidP_GetCaps(pp, &caps) == HIDP_STATUS_SUCCESS && caps.UsagePage == 1 && caps.Usage == 5 && caps.InputReportByteLength >= 10 &&
+                caps.InputReportByteLength <= 200) {
+                *in_len = caps.InputReportByteLength;
+                *bt     = caps.InputReportByteLength != 64;
+                result  = h;
+                ok      = true;
+            }
+            HidD_FreePreparsedData(pp);
+        }
+        if (!ok) CloseHandle(h);
+    }
+    SetupDiDestroyDeviceInfoList(set);
+    return result;
+}
+
+void hid_parse(const BYTE* b, DWORD n, bool bt, Virt& v) {
+    // the same fields in three layouts: USB 0x01 and Bluetooth 0x31 (X Y RX RY L2 R2 seq buttons0..2), Bluetooth 0x01 (short)
+    BYTE x, y, rx, ry, l2, r2, b0, b1;
+    if (b[0] == 0x31 && n >= 12) {
+        const BYTE* d = b + 2;
+        x = d[0]; y = d[1]; rx = d[2]; ry = d[3]; l2 = d[4]; r2 = d[5]; b0 = d[7]; b1 = d[8];
+    } else if (b[0] == 0x01 && !bt && n >= 11) {
+        const BYTE* d = b + 1;
+        x = d[0]; y = d[1]; rx = d[2]; ry = d[3]; l2 = d[4]; r2 = d[5]; b0 = d[7]; b1 = d[8];
+    } else if (b[0] == 0x01 && bt && n >= 10) {
+        x = b[1]; y = b[2]; rx = b[3]; ry = b[4]; b0 = b[5]; b1 = b[6]; l2 = b[8]; r2 = b[9];
+    } else {
+        return;
+    }
+    WORD btn = 0;
+    if (b0 & 0x10) btn |= X_X;
+    if (b0 & 0x20) btn |= X_A;
+    if (b0 & 0x40) btn |= X_B;
+    if (b0 & 0x80) btn |= X_Y;
+    switch (b0 & 0x0F) {
+        case 0: btn |= X_UP; break;
+        case 1: btn |= X_UP | X_RIGHT; break;
+        case 2: btn |= X_RIGHT; break;
+        case 3: btn |= X_DOWN | X_RIGHT; break;
+        case 4: btn |= X_DOWN; break;
+        case 5: btn |= X_DOWN | X_LEFT; break;
+        case 6: btn |= X_LEFT; break;
+        case 7: btn |= X_UP | X_LEFT; break;
+        default: break;
+    }
+    if (b1 & 0x01) btn |= X_LB;
+    if (b1 & 0x02) btn |= X_RB;
+    if (b1 & 0x10) btn |= X_BACK;
+    if (b1 & 0x20) btn |= X_START;
+    if (b1 & 0x40) btn |= X_LS;
+    if (b1 & 0x80) btn |= X_RS;
+    auto st = [](BYTE c) { return static_cast<SHORT>((static_cast<int>(c) - 128) * 257); };
+    v.buttons = btn;
+    v.lt = l2;
+    v.rt = r2;
+    if (bt && b[0] == 0x01) { // the short report's triggers can be missing: the digital ones then
+        if (!l2 && (b1 & 0x04)) v.lt = 255;
+        if (!r2 && (b1 & 0x08)) v.rt = 255;
+    }
+    v.lx = st(x);
+    v.ly = static_cast<SHORT>(-st(y));
+    v.rx = st(rx);
+    v.ry = static_cast<SHORT>(-st(ry));
+    v.present = true;
+}
+
+DWORD WINAPI hid_reader(LPVOID) {
+    for (;;) {
+        USHORT in_len = 0;
+        bool bt       = false;
+        HANDLE h      = hid_open(&in_len, &bt);
+        if (h == INVALID_HANDLE_VALUE) {
+            Sleep(2000);
+            continue;
+        }
+        plog(std::string("input: DualSense read directly over ") + (bt ? "Bluetooth" : "USB"));
+        OVERLAPPED ov{};
+        ov.hEvent    = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        bool pending = false;
+        BYTE buf[256];
+        for (;;) {
+            if (!pending) {
+                ResetEvent(ov.hEvent);
+                if (!ReadFile(h, buf, in_len, nullptr, &ov) && GetLastError() != ERROR_IO_PENDING) break;
+                pending = true;
+            }
+            const DWORD w = WaitForSingleObject(ov.hEvent, 500);
+            if (w == WAIT_TIMEOUT) continue;
+            DWORD n = 0;
+            if (w != WAIT_OBJECT_0 || !GetOverlappedResult(h, &ov, &n, FALSE)) break;
+            pending = false;
+            Virt v;
+            hid_parse(buf, n, bt, v);
+            if (v.present) {
+                std::scoped_lock lk{g_hmu};
+                v.packet = g_hid.packet + 1;
+                g_hid    = v;
+                g_hid_present.store(true, std::memory_order_relaxed);
+            }
+        }
+        CancelIo(h);
+        CloseHandle(h);
+        CloseHandle(ov.hEvent);
+        {
+            std::scoped_lock lk{g_hmu};
+            g_hid = Virt{};
+            g_hid_present.store(false, std::memory_order_relaxed);
+        }
+        plog("input: the DualSense read directly is gone");
+        Sleep(1000);
     }
 }
 
@@ -419,16 +573,35 @@ bool caller_is_mod(void* ra) {
     return mod;
 }
 
+Virt combine() {
+    Virt v;
+    auto bigger = [](SHORT cur, SHORT nw) { return std::abs(static_cast<int>(nw)) > std::abs(static_cast<int>(cur)) ? nw : cur; };
+    auto add    = [&](const Virt& o) {
+        if (!o.present) return;
+        v.present = true;
+        v.buttons = static_cast<WORD>(v.buttons | o.buttons);
+        v.lt      = std::max(v.lt, o.lt);
+        v.rt      = std::max(v.rt, o.rt);
+        v.lx = bigger(v.lx, o.lx); v.ly = bigger(v.ly, o.ly); v.rx = bigger(v.rx, o.rx); v.ry = bigger(v.ry, o.ry);
+        v.packet += o.packet;
+    };
+    if (g_present.load(std::memory_order_relaxed)) {
+        std::scoped_lock lk{g_vmu};
+        add(g_virt);
+    }
+    if (g_hid_present.load(std::memory_order_relaxed)) {
+        std::scoped_lock lk{g_hmu};
+        add(g_hid);
+    }
+    return v;
+}
+
 DWORD WINAPI detour_get_state(DWORD idx, PadState* s) {
     const DWORD r = g_real(idx, s);
-    if (!s || idx > 3 || !g_present.load(std::memory_order_relaxed)) return r;
+    if (!s || idx > 3 || !(g_present.load(std::memory_order_relaxed) || g_hid_present.load(std::memory_order_relaxed))) return r;
     if (r != ERROR_SUCCESS && idx != 0) return r;
     if (!caller_is_mod(__builtin_return_address(0))) return r;
-    Virt v;
-    {
-        std::scoped_lock lk{g_vmu};
-        v = g_virt;
-    }
+    const Virt v = combine();
     if (!v.present) return r;
     if (r == ERROR_SUCCESS) { // an XInput pad is there: the other controller's input joins it
         s->buttons = static_cast<WORD>(s->buttons | v.buttons);
@@ -486,6 +659,7 @@ void start_input() {
         return;
     }
     read_ignore();
+    if (HANDLE t = CreateThread(nullptr, 0, hid_reader, nullptr, 0, nullptr)) CloseHandle(t);
     if (HANDLE t = CreateThread(nullptr, 0, reader, nullptr, 0, nullptr)) CloseHandle(t);
 }
 

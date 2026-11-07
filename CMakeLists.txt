@@ -70,7 +70,7 @@ target_include_directories(fh3mod_platform PRIVATE include src ${CMAKE_CURRENT_B
 # this DLL very early, and an app-folder version.dll or winhttp.dll proxy
 # from some other mod must not get pulled in by us. WinHTTP is loaded from
 # System32 when the first update check runs.
-target_link_libraries(fh3mod_platform PRIVATE user32)
+target_link_libraries(fh3mod_platform PRIVATE user32 setupapi hid)
 set_target_properties(fh3mod_platform PROPERTIES OUTPUT_NAME d3dcompiler_47 PREFIX "")
 # Azimuth 1.0.3 no longer imports d3dcompiler_47.dll, while 1.0.1 and later import DWrite.dll.
 # The DLL forwards both, so the build leaves a copy of it under that name too.
