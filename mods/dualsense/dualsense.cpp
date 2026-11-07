@@ -186,6 +186,16 @@ void sample(char* car) {
         g_prev_t  = t;
         g_prev_ok = true;
         g_car_tick.store(GetTickCount64());
+        if (g_verbose) {
+            static ULONGLONG last = 0;
+            const ULONGLONG n     = GetTickCount64();
+            if (n - last > 700) {
+                last = n;
+                say("car: engine %.0f rpm (omega %.1f rad/s), limit %.0f rpm (%.1f rad/s), ratio %.3f, throttle raw %.3f, gear %d, speed %.1f m/s", static_cast<double>(omega * kRadPerSecToRpm),
+                    static_cast<double>(omega), static_cast<double>(limit * kRadPerSecToRpm), static_cast<double>(limit), static_cast<double>(omega / limit), static_cast<double>(thr), gear,
+                    static_cast<double>(std::sqrt(vx * vx + vy * vy + vz * vz)));
+            }
+        }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
     }
 }
@@ -407,7 +417,7 @@ int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 // A brake pedal: light first, harder towards the end of the travel.
 void trig_brake(BYTE* e) {
     BYTE force[10] = {};
-    for (int i = 2; i < 10; ++i) force[i] = static_cast<BYTE>(clampi(1 + (i - 2) * 5 / 7, 1, 8));
+    for (int i = 4; i < 10; ++i) force[i] = static_cast<BYTE>(clampi(1 + (i - 4) * 3 / 5, 1, 4));   // light, a little harder at the end
     trig_zones(e, 0x21, force, 0);
 }
 void trig_vib(BYTE* e, int amp, int hz) {
@@ -450,7 +460,9 @@ struct Last {
 void send_output(Ds& d, bool neutral) {
     const ULONGLONG now = GetTickCount64();
     const bool driving  = !neutral && g_enabled.load() && now - g_hud_tick.load() < 600 && now - g_car_tick.load() < 400;
-    const float ratio   = driving ? g_ratio.load() : 0;
+    float ratio         = driving ? g_ratio.load() : 0;
+    const bool moving   = g_speed.load() > 3.0f && g_gear.load() > 0;
+    if (!moving) ratio = std::min(ratio, 0.9f);   // never the limiter's effects standing still or in neutral
     const float thr     = driving ? g_throttle.load() : 0;
     const float strength = g_rumble.load();
     const bool full     = g_last.first || now - g_last.full > 1000;
@@ -491,8 +503,8 @@ void send_output(Ds& d, bool neutral) {
     trig_off(e[0]);
     trig_off(e[1]);
     if (driving && g_triggers.load()) {
-        trig_brake(e[0]);
-        if (ratio >= 0.975f && thr > 0.5f) trig_vib(e[1], 5, 40);
+        if (g_speed.load() > 2.0f) trig_brake(e[0]);
+        if (ratio >= 0.975f && thr > 0.8f) trig_vib(e[1], 4, 30);
     }
     if (full || std::memcmp(e, g_last.trig, sizeof e)) {
         c[0] |= 0x04 | 0x08;
@@ -510,7 +522,7 @@ void send_output(Ds& d, bool neutral) {
         rgb[0] = mixb(g_color[0], 255, t);
         rgb[1] = mixb(g_color[1], 0, t);
         rgb[2] = mixb(g_color[2], 0, t);
-        if (ratio >= 0.975f && ((now / 40) & 1)) rgb[0] = rgb[1] = rgb[2] = 0;
+        if (ratio >= 0.975f && ((now / 120) & 1)) { rgb[0] = 255; rgb[1] = 255; rgb[2] = 255; }   // a white pulse on the limiter
     }
     if (g_last.first) {
         c[38] |= 0x02;   // light bar setup: ends the blue start-up animation
@@ -524,7 +536,7 @@ void send_output(Ds& d, bool neutral) {
     static const BYTE bars[6] = {0x00, 0x01, 0x03, 0x07, 0x0F, 0x1F};
     BYTE player = 0x04;   // player 1
     if (driving && g_rev_lights.load()) {
-        if (ratio >= 0.975f) player = ((now / 50) & 1) ? 0x1F : 0x00;
+        if (ratio >= 0.975f) player = ((now / 150) & 1) ? 0x1F : 0x0E;
         else player = ratio < 0.70f ? 0x00 : bars[clampi(static_cast<int>((ratio - 0.70f) / 0.055f) + 1, 1, 5)];
     }
     if (g_lights.load() && (full || player != g_last.player)) {
