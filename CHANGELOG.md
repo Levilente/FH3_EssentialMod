@@ -1,18 +1,8 @@
 # Changelog
 
-## Unreleased
-
-- **Tuning rows: up to 64** (was 8); the tuning page scrolls.
-- **`upgrade_preview_stage(mod, handle)` (API 15)**: the stage of your upgrade the garage's upgrade list is showing right now, for as long as the cursor stays on it (-1 when none, or when the stage is in the basket). `upgrade_stage`'s preview still answers for 300 ms only; nothing existing changed, the new function only adds to the end of the API table.
-- **Tuning rows get a header band and a reliable thumb**: each row of `add_tuning_row` now has a band above it like the game's RIDE HEIGHT / LOW / HIGH / cm (title in capitals, the minimum and maximum, the unit). The `label` may be `"Header|Row label (unit)"`; without a bar the header and row share the text, and a trailing `(unit)` goes to the band. The slider's thumb now follows the track slider's value, so it is right after leaving and re-entering the tuning menu (before it kept the old position until moved).
-- **The platform follows the player's car itself (API 14)**: it reads the player's garage from the save and watches the car the player drives (the HUD's car), so the driven car, `upgrade_stage(handle, 0)`, `upgrade_active_garage` and the stage callbacks are right for every mod at once: a car switch at an event's car select no longer leaves the chosen car without its custom upgrades until the game saves it, and a car that isn't one of the player's (a loaner) gets stage 0 and garage 0, without code in the mod. Before, the driven garage id came only from the game's statements and lagged behind such a switch by several seconds.
-- **AI cars of the player's model get none of the player's upgrades**: the platform watches every car the game builds and tells the player's car from an AI car of the same model (a one-make race), so `upgrade_garage_for_car` / `upgrade_stage_for_car` called while a car is built answer 0 for the AI's. Before, every car of the player's model got the player's wheel spacers.
-- `upgrade_garage_for_car(car_id, flags)` and `upgrade_stage_for_car(mod, handle, car_id)` (API 14): which of the player's cars a car the game builds is, and your stage on it, for mods that change a car while it is built (wheel spacers).
-- **Tuning rows (API 13)**: `add_tuning_row` adds a slider to the car's Tuning > Springs page (bound to custom AVUI properties, optional per-car `visible` callback).
-
 ## 1.0.0
 
-First release of the **FH3 Mod Platform**, a fork of Trinculo54's FH2 Mod Platform for Forza Horizon 3 (Azimuth), mod API version 12.
+First release of the **FH3 Mod Platform**, a fork of Trinculo54's FH2 Mod Platform for Forza Horizon 3 (Azimuth), mod API version 15.
 
 - Loads every mod DLL in `fh3-mods`; hooks, byte patches, hotkeys, commands (`fh3mod.exe`), mods calling each other, sessions, save snapshots, crash reports that name the mod involved, a full log.
 - **Mods in the game's menus**: a MODS tile on the Home tab with *Installed mods*, *Updates*, *About* and *All settings*; mods add On/Off, slider and choice rows in the game's own style; update checks of mods on GitHub; "Load when playing online" for FH2MP setups.
@@ -25,6 +15,13 @@ First release of the **FH3 Mod Platform**, a fork of Trinculo54's FH2 Mod Platfo
   - `camera_part` in the upgrade definition points the shop's camera at a part of the car while the upgrade's list is open (the front or rear wheel for wheel spacers, as for rim size);
   - `upgrade_car_model(garage)` returns the model recorded for a garage car, so a mod can tell when the player sits in another car (a mission loaner);
   - the log says which query switched the driven car, and traces basket, commit and abandon steps.
+- **The platform follows the player's car** (API 14): it reads the player's garage from the save, watches the car the player drives and every car the game builds, so for every mod:
+  - a car chosen at an event's car select has its custom upgrades from the start;
+  - a car that isn't the player's (a showcase car, a loaner, a test drive) gets stage 0 and garage 0;
+  - an AI car of the player's model (a one-make race) gets none of the player's upgrades;
+  - `upgrade_garage_for_car` / `upgrade_stage_for_car` answer, from a hook in the game's car building, whose car is being built and your stage on it. [docs/car-mods.md](docs/car-mods.md) is the guide for mods that change the car.
+- **Tuning rows** (API 13): `add_tuning_row` adds a slider row to the car's Tuning > Springs page, with a header band in the game's style (title, minimum, maximum, unit), per-car visibility, and up to 64 rows (the page scrolls).
+- **Shop preview for effects outside the car's data** (API 15): `upgrade_preview_stage` is the stage the upgrade list shows while the cursor stays on it, `upgrade_shop_serial` goes up with every step the list takes.
 - **Speed unit and Power unit** rows under *Units* in Settings > HUD and Gameplay: km/h or mph, horsepower or kilowatts, whatever *Units* is set to.
 - **Sell Car**: *SELL CAR* after *Remove car from garage* in a car's action menu; pays a share of the model's price and of what was paid for its upgrades (`platform-sellcar.ini`).
 - **Exit to Desktop** shows the game's own saving popup.

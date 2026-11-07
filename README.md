@@ -20,7 +20,10 @@ on start, and it loads every mod DLL in the `fh3-mods` folder.
   settings), *Updates*, *About* and *All settings* (the *Get Mods* tile is a placeholder and does nothing yet; there is no mod site for FH3). Mods put their own On/Off, slider and choice rows there, in the game's own style.
 - **Update checks.** Mods that name their GitHub repo get checked for new releases; the page tells you which one has an update.
 - **Custom upgrades in the garage.** Mods can add upgrades to **Garage > Upgrades** (name, stages, prices, icons) that are bought, fitted, stored per
-  car and survive Abandon / Modified car prompts like the game's own parts. The first mod on it is NitroSystem II's Nitrous Kit.
+  car and survive Abandon / Modified car prompts like the game's own parts, with a preview on the car in the shop and slider rows on the car's
+  Tuning > Springs page.
+- **Upgrades stay on your own cars.** The platform keeps track of the car you drive: a car you pick at an event's car select has its upgrades
+  from the start, while showcase cars, loaners and AI cars of the same model as yours (one-make races) get none.
 - **Speed unit and power unit of their own.** In **Settings > HUD and Gameplay**, under *Units*, two new rows: *Speed unit*
   (Automatic, km/h, mph) and *Power unit* (Automatic, Horsepower, Kilowatts). Metric with km/h *and* horsepower, or Imperial with kW, no longer needs a mod of your own. *Automatic* follows *Units* as before.
 - **Sell Car.** In **Garage > My Cars**, a car's action menu gets **SELL CAR** after *Remove car from garage*: a confirmation shows what you get
@@ -31,9 +34,9 @@ on start, and it loads every mod DLL in the `fh3-mods` folder.
 
 **For mod makers**
 
-- A C/C++ API (`include/fh3mod.h`, API version 14, documented in [`docs/api.md`](docs/api.md)): game-text edits, game-file overrides, database patches
+- A C/C++ API (`include/fh3mod.h`, API version 15, documented in [`docs/api.md`](docs/api.md)): game-text edits, game-file overrides, database patches
   (`add_sql`), string-table keys for FH3's hashed tables, Mods-page rows (On/Off, sliders, choices), hooks and byte patches, hotkeys, commands
-  (`fh3mod.exe`), interfaces between mods, sessions, save snapshots, and the **upgrade bridge** (`register_upgrade`).
+  (`fh3mod.exe`), interfaces between mods, sessions, save snapshots, the **upgrade bridge** (`register_upgrade`) and tuning rows (`add_tuning_row`).
 - A mod is one DLL; [`docs/writing-a-mod.md`](docs/writing-a-mod.md) goes from an empty folder to a release. Mods that change the player's car (upgrades, build-time changes) should read [`docs/car-mods.md`](docs/car-mods.md): the platform tells the player's car from loaners and AI cars of the same model, so mods don't have to. [`examples/hello_mod`](examples/hello_mod/hello_mod.cpp) is the starting point.
 - What is known about the game's code: [`docs/fh3-game-notes.md`](docs/fh3-game-notes.md) and [`include/fh3game.h`](include/fh3game.h).
 
@@ -95,6 +98,14 @@ a release tag (`vX.Y.Z`) must match it. See [`RELEASING.md`](RELEASING.md).
 - **[RokkuDayo](https://github.com/RokkuDayo)**, for **[Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions)**.
 - **[MinHook](https://github.com/TsudaKageyu/minhook)** (BSD 2-Clause), the function hooking library.
 - **Levilente**, the FH3 port: Mods pages, upgrade bridge, units, Sell Car, saving screen.
+
+## Mods on the platform
+
+| Mod | What it adds |
+|---|---|
+| [NitroSystem II for FH3](https://github.com/Levilente/NitroSystem-II---FH3) | a Nitrous Kit upgrade and Fast & Furious style nitro (LB) |
+| [Universal Wheel Spacers](https://github.com/Levilente/UniversalWheelSpacers_FH3) | front and rear wheel spacers, +1 to +9 cm |
+| [Airride](https://github.com/Levilente/AirRide_FH3) | air suspension: lower the car when it stands still |
 
 ## License
 

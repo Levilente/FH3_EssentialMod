@@ -1,10 +1,10 @@
 # API reference
 
-> Version numbers such as *platform 2.8.0* in this file are those of the FH2 platform this one was forked from. The FH3 Mod Platform starts at 1.0.0 (API version 12).
+> Version numbers such as *platform 2.8.0* in this file are those of the FH2 platform this one was forked from. The FH3 Mod Platform starts at 1.0.0 (API version 15).
 
 Everything is in [`include/fh3mod.h`](../include/fh3mod.h). This page goes through it member by member.
 
-**API versions.** The numbering continues the FH2 platform's, so a mod written for it keeps its version checks: version 2 added file overrides, database patches and interfaces between mods, 3 hooks, 4 the Mods page, 5 its sliders, 6 mod descriptions and link rows, 7 byte patches and instruction hooks, 8 pages of your own, 9 title-screen entries, choice rows, online play (FH2MP), sessions, snapshots, hotkeys and commands, 10 `add_string_key` (strings for FH3's hashed string tables) 11 custom garage upgrades (`register_upgrade`) and 12 `upgrade_car_model`. The FH3 Mod Platform 1.0.0 has API version 12. Check `api->api_version` (or `api->size`) before using anything added after version 1. Where a section below says "platform 2.x", that is the FH2 platform release the feature first appeared in; the version to check is the API version.
+**API versions.** The numbering continues the FH2 platform's, so a mod written for it keeps its version checks: version 2 added file overrides, database patches and interfaces between mods, 3 hooks, 4 the Mods page, 5 its sliders, 6 mod descriptions and link rows, 7 byte patches and instruction hooks, 8 pages of your own, 9 title-screen entries, choice rows, online play (FH2MP), sessions, snapshots, hotkeys and commands, 10 `add_string_key` (strings for FH3's hashed string tables) 11 custom garage upgrades (`register_upgrade`), 12 `upgrade_car_model`, 13 tuning rows (`add_tuning_row`), 14 the platform following the player's car (`upgrade_garage_for_car`, `upgrade_stage_for_car`) and 15 `upgrade_preview_stage` and `upgrade_shop_serial`. The FH3 Mod Platform 1.0.0 has API version 15. Check `api->api_version` (or `api->size`) before using anything added after version 1. Where a section below says "platform 2.x", that is the FH2 platform release the feature first appeared in; the version to check is the API version.
 
 **What is not in FH3 yet.** `add_page` (pages of your own, API 8) and `add_title_entry` (title-screen entries, API 9) return 0 and say why in the log: they need game addresses that were only found for FH2. Everything else in this file works in the FH3 platform; the Mods page, its rows, update checks, file overrides, database patches and the upgrade bridge are the parts the FH3 port added or reworked.
 
@@ -787,6 +787,11 @@ int      upgrade_stage(FH3Mod* mod, int handle, int32_t garage);
 uint32_t upgrade_active_garage(void);
 void     upgrade_import(FH3Mod* mod, int handle, int32_t garage, int32_t ordinal, int stage, uint32_t owned_mask);
 int32_t  upgrade_car_model(int32_t garage);   // API 12
+int32_t  upgrade_garage_for_car(int32_t car_id, uint32_t flags);       // API 14
+int      upgrade_stage_for_car(FH3Mod* mod, int handle, int32_t car_id); // API 14
+int      upgrade_preview_stage(FH3Mod* mod, int handle);   // API 15
+uint32_t upgrade_shop_serial(void);                        // API 15
+int      add_tuning_row(FH3Mod* mod, const FH3TuningRow* row);   // API 13
 ```
 
 - `register_upgrade` (call it from `fh3mod_init`) returns a handle (the slot, 0 or more) or -1; the log says why. `size` must be `sizeof(FH3UpgradeDef)`.
@@ -794,6 +799,10 @@ int32_t  upgrade_car_model(int32_t garage);   // API 12
 - `on_stage` is called on the game's thread when the stage on a car becomes known or changes: the player drove another car, or a stage was installed. Keep it short.
 - `upgrade_stage` is the stage fitted on the car with that garage id (0 is stock), or on the car being driven if `garage <= 0`; `upgrade_active_garage` is the garage id of the car being driven (0 until known).
 - `upgrade_car_model` (API 12) returns the model (car ordinal) the platform has recorded for a garage id, or 0 if unknown. A mod that finds the driven car's model itself can compare the two: when they differ the game has put the player in another car (a mission loaner), and the garage car's upgrades do not apply. NitroSystem II uses it to switch off nitro in such cars.
+- **From API 14 the platform follows the player's car itself**: car switches (an event's car select), loaners and showcase cars are already in `upgrade_stage(handle, 0)`, `upgrade_active_garage` (0 when the driven car isn't the player's) and the `on_stage` calls (garage 0, stage 0 in such a car). A mod doesn't need `upgrade_car_model` for that any more.
+- `upgrade_stage_for_car` (API 14) is for a hook in the game's car building: the stage of your upgrade on the car being built, by its Data_Car id, 0 when that car isn't the player's (an AI car of the same model in a one-make race, a loaner), and the previewed stage in the shop. `upgrade_garage_for_car` gives the garage id instead. Call them from the build hook itself. [car-mods.md](car-mods.md) explains how the platform decides and how to test a car mod.
+- `upgrade_preview_stage` (API 15) is the stage the shop's list shows while the cursor stays on it (-1 otherwise), for an effect that isn't built into the car (the Airride lowers the showroom car); `upgrade_shop_serial` goes up with every step the list takes, so a mod that ends its preview on the back button can keep it ended until the next hover.
+- `add_tuning_row` (API 13) adds a slider row with a header band to the car's Tuning > Springs page (up to 64 rows); see `FH3TuningRow` in the header. Airride's "Drop (cm)" row is one.
 - `upgrade_import` moves a mod's own earlier per-car data to the platform once: car `garage` (model `ordinal`, or 0) had `stage` fitted and owns the stages whose bits are set in `owned_mask`. NitroSystem II uses it to bring its FH2-style per-car stages over.
 
 Stage prices are charged by the platform when the player confirms the setup in the shop; stages that were bought stay owned, and switching back to an owned stage is free.
@@ -812,10 +821,10 @@ For your upgrade to show on hover:
 
 - **Read `upgrade_stage` at the moment the game builds the car** (in the hook on the game's car-building code), not once in `on_stage` and keep it. `on_stage` is not called for a preview: the stage is not fitted.
 - **Don't cache the stage** between builds. Reading it is cheap (no file access).
-- Pass the garage id (`upgrade_active_garage()`, or `0` for the car being driven). The preview belongs to the car in the shop.
+- Use `upgrade_stage_for_car(mod, handle, car_id)` with the built car's Data_Car id (API 14): it gives the preview in the shop and 0 for cars that aren't the player's. On an older platform, pass the garage id (`upgrade_active_garage()`, or `0` for the car being driven).
 - Effects that only exist while driving (a nitro boost, for example) have nothing to show in the shop; they should use the fitted stage, which `on_stage` reports.
 
-Universal Wheel Spacers is the example: its hook on the car loader asks `upgrade_stage` for the front and rear stage every time the game builds a car and adds the width to the track values, so the wheels move out as the cursor goes down the stages.
+Universal Wheel Spacers is the example: its hook on the car loader asks `upgrade_stage_for_car` for the front and rear stage every time the game builds a car and adds the width to the track values, so the wheels move out as the cursor goes down the stages.
 
 ### The game's part set
 
