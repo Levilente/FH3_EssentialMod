@@ -19,6 +19,7 @@
 // Nothing here writes to the game or to a mod; with `[input] Enabled=0` in fh3-mods\platform.ini it all stays off,
 // `[input] Raw=0` keeps the hook but drops the controller reader, and `[input] Ignore=054C:0CE6,...` skips devices.
 #include "platform.hpp"
+#include "updates.hpp"
 
 #include <windows.h>
 
@@ -387,13 +388,384 @@ DWORD WINAPI reader(LPVOID) {
 }
 
 
+// ---- shared with mods (the DualSense mod): "Local\FH3ModPlatform.Vibration" ----------------------------------------------------
+// The game's rumble as the engine sends it to the controller the platform gave it, when the car's feedback last came in (a mod
+// that hooks it writes driving_tick: the mouse moves the menus' cursor only when it knows the car isn't being driven), and
+// whether gyro steering is on (the DualSense mod lights the mic button for it).
+struct Shared {
+    float lm, rm, lt, rt;
+    DWORD tick;
+    volatile DWORD driving_tick;
+    volatile DWORD gyro_on;
+    DWORD reserved[9];
+};
+Shared* g_shared = nullptr;
+
+// ---- the controls' settings: fh3-mods\DualSense.ini [Controller], [Keyboard], [Keys], [Mouse] (as FH2-Input's) -------------------
+std::wstring ds_ini() { return (azimuth_dir() / "fh3-mods" / "DualSense.ini").wstring(); }
+std::wstring ini_str(const wchar_t* sec, const wchar_t* key, const wchar_t* def) {
+    wchar_t buf[256] = L"";
+    const std::wstring f = ds_ini();
+    GetPrivateProfileStringW(sec, key, L"\x01", buf, 256, f.c_str());
+    if (buf[0] == 1 && !buf[1]) { // not there: written with its default, so the file lists every setting
+        WritePrivateProfileStringW(sec, key, def, f.c_str());
+        return def;
+    }
+    return buf;
+}
+float ini_float(const wchar_t* sec, const wchar_t* key, float def) {
+    wchar_t d[32];
+    _snwprintf(d, 32, L"%g", static_cast<double>(def));
+    const std::wstring v = ini_str(sec, key, d);
+    return v.empty() ? def : static_cast<float>(std::wcstod(v.c_str(), nullptr));
+}
+int ini_int(const wchar_t* sec, const wchar_t* key, int def) { return static_cast<int>(std::lround(ini_float(sec, key, static_cast<float>(def)))); }
+bool ieq(const std::wstring& a, const wchar_t* b) { return CompareStringOrdinal(a.c_str(), -1, b, -1, TRUE) == CSTR_EQUAL; }
+
+WORD button_of(const std::wstring& n) {
+    static const struct { const wchar_t* name; WORD bit; } names[] = {
+        {L"A", X_A}, {L"B", X_B}, {L"X", X_X}, {L"Y", X_Y}, {L"LB", X_LB}, {L"RB", X_RB}, {L"LS", X_LS}, {L"RS", X_RS}, {L"Menu", X_START},
+        {L"View", X_BACK}, {L"DPadUp", X_UP}, {L"DPadDown", X_DOWN}, {L"DPadLeft", X_LEFT}, {L"DPadRight", X_RIGHT}};
+    for (const auto& b : names)
+        if (ieq(n, b.name)) return b.bit;
+    return 0;
+}
+
+struct ControllerSettings {
+    bool swap = false;           // Circle confirms, Cross goes back
+    WORD touch = X_BACK, create = X_BACK;
+    bool swipes = true;
+    WORD lpaddle = X_X, rpaddle = X_B, lfn = 0, rfn = 0;
+    int gyro = 1;                // 0 off, 1 the mic button switches it, 2 always
+    float gyro_max = 45.0f;      // degrees of tilt for a full lock
+    bool gyro_invert = false;
+} S;
+
+void load_controller_settings() {
+    const wchar_t* c = L"Controller";
+    S.swap        = ini_int(c, L"SwapCrossCircle", 0) != 0;
+    S.touch       = button_of(ini_str(c, L"TouchpadClick", L"View"));
+    S.create      = button_of(ini_str(c, L"CreateButton", L"View"));
+    S.swipes      = ini_int(c, L"TouchpadSwipes", 1) != 0;
+    S.lpaddle     = button_of(ini_str(c, L"EdgeLeftPaddle", L"X"));
+    S.rpaddle     = button_of(ini_str(c, L"EdgeRightPaddle", L"B"));
+    S.lfn         = button_of(ini_str(c, L"EdgeLeftFn", L""));
+    S.rfn         = button_of(ini_str(c, L"EdgeRightFn", L""));
+    const std::wstring g = ini_str(c, L"Gyro", L"MicButton");
+    S.gyro        = ieq(g, L"Off") || ieq(g, L"0") ? 0 : ieq(g, L"Always") || ieq(g, L"2") ? 2 : 1;
+    S.gyro_max    = std::max(5.0f, ini_float(c, L"GyroMaxAngle", 45.0f));
+    S.gyro_invert = ini_int(c, L"GyroInvert", 0) != 0;
+}
+
+// The DualSense's own state between reports: the touchpad's swipe, gyro steering, the buttons that toggle.
+struct DsState {
+    bool touching = false, swiped = false;
+    int x0 = 0, y0 = 0;
+    ULONGLONG pulse_until = 0;
+    WORD pulse = 0;
+    bool gyro_on = false, mic_was = false, have_g = false;
+    float g[3] = {0, 0, 0};
+    float neutral = 0;
+} T;
+
+// ---- the keyboard as a gamepad, and the mouse on it (FH2-Input's keyboard.h and mouse.h) ---------------------------------------
+enum { KB_THROTTLE, KB_BRAKE, KB_LEFT, KB_RIGHT, KB_STICK_UP, KB_STICK_DOWN, KB_LOOK_LEFT, KB_LOOK_RIGHT, KB_LOOK_UP, KB_LOOK_DOWN,
+       KB_A, KB_B, KB_X, KB_Y, KB_LB, KB_RB, KB_LS, KB_RS, KB_MENU, KB_VIEW, KB_DUP, KB_DDOWN, KB_DLEFT, KB_DRIGHT, KB_COUNT };
+const struct { const wchar_t* key; const wchar_t* def; WORD button; } kKb[KB_COUNT] = {
+    {L"Throttle", L"W", 0}, {L"Brake", L"S", 0}, {L"SteerLeft", L"A", 0}, {L"SteerRight", L"D", 0}, {L"StickUp", L"", 0},
+    {L"StickDown", L"", 0}, {L"LookLeft", L"J", 0}, {L"LookRight", L"L", 0}, {L"LookUp", L"I", 0}, {L"LookDown", L"K", 0},
+    {L"A", L"Space, Enter", X_A}, {L"B", L"E, Backspace", X_B}, {L"X", L"Q", X_X}, {L"Y", L"R", X_Y}, {L"LB", L"LShift", X_LB},
+    {L"RB", L"C", X_RB}, {L"LeftStickClick", L"F", X_LS}, {L"RightStickClick", L"V", X_RS}, {L"Menu", L"Escape", X_START},
+    {L"View", L"Tab", X_BACK}, {L"DPadUp", L"Up", X_UP}, {L"DPadDown", L"Down", X_DOWN}, {L"DPadLeft", L"Left", X_LEFT},
+    {L"DPadRight", L"Right", X_RIGHT}};
+constexpr int KB_MAX_KEYS = 4;
+BYTE g_kb_keys[KB_COUNT][KB_MAX_KEYS];
+bool g_kb_on = true, g_kb_focus = true;
+float g_kb_steer_speed = 3, g_kb_steer_return = 5, g_kb_pedal = 8, g_kb_look = 0;
+std::mutex g_kmu;
+float g_kb_steer = 0, g_kb_thr = 0, g_kb_brake = 0, g_kb_lx = 0, g_kb_ly = 0;
+double g_kb_last = 0;
+std::atomic<bool> g_kb_joined{false};
+
+BYTE vk_of(std::wstring n) {
+    static const struct { const wchar_t* name; BYTE vk; } names[] = {
+        {L"Space", VK_SPACE}, {L"Enter", VK_RETURN}, {L"Return", VK_RETURN}, {L"Backspace", VK_BACK}, {L"Tab", VK_TAB}, {L"Escape", VK_ESCAPE},
+        {L"Esc", VK_ESCAPE}, {L"Shift", VK_SHIFT}, {L"LShift", VK_LSHIFT}, {L"RShift", VK_RSHIFT}, {L"Ctrl", VK_CONTROL}, {L"LCtrl", VK_LCONTROL},
+        {L"RCtrl", VK_RCONTROL}, {L"Alt", VK_MENU}, {L"LAlt", VK_LMENU}, {L"RAlt", VK_RMENU}, {L"Up", VK_UP}, {L"Down", VK_DOWN}, {L"Left", VK_LEFT},
+        {L"Right", VK_RIGHT}, {L"Home", VK_HOME}, {L"End", VK_END}, {L"PageUp", VK_PRIOR}, {L"PageDown", VK_NEXT}, {L"Insert", VK_INSERT},
+        {L"Delete", VK_DELETE}, {L"CapsLock", VK_CAPITAL}, {L"NumpadPlus", VK_ADD}, {L"NumpadMinus", VK_SUBTRACT}, {L"NumpadStar", VK_MULTIPLY},
+        {L"NumpadSlash", VK_DIVIDE}, {L"NumpadDot", VK_DECIMAL}, {L"Comma", VK_OEM_COMMA}, {L"Period", VK_OEM_PERIOD}, {L"Minus", VK_OEM_MINUS},
+        {L"Equals", VK_OEM_PLUS}, {L"Semicolon", VK_OEM_1}, {L"Slash", VK_OEM_2}, {L"Backquote", VK_OEM_3}, {L"LBracket", VK_OEM_4},
+        {L"Backslash", VK_OEM_5}, {L"RBracket", VK_OEM_6}, {L"Quote", VK_OEM_7}, {L"Mouse1", VK_LBUTTON}, {L"Mouse2", VK_RBUTTON},
+        {L"Mouse3", VK_MBUTTON}, {L"Mouse4", VK_XBUTTON1}, {L"Mouse5", VK_XBUTTON2}};
+    if (n.size() == 1) {
+        wchar_t c = static_cast<wchar_t>(std::towupper(n[0]));
+        if ((c >= L'A' && c <= L'Z') || (c >= L'0' && c <= L'9')) return static_cast<BYTE>(c);
+    }
+    if ((n[0] == L'F' || n[0] == L'f') && n.size() >= 2 && n.size() <= 3 && std::iswdigit(n[1])) {
+        const int f = std::wcstol(n.c_str() + 1, nullptr, 10);
+        if (f >= 1 && f <= 24) return static_cast<BYTE>(VK_F1 + f - 1);
+    }
+    if (n.size() == 7 && CompareStringOrdinal(n.c_str(), 6, L"Numpad", 6, TRUE) == CSTR_EQUAL && std::iswdigit(n[6]))
+        return static_cast<BYTE>(VK_NUMPAD0 + (n[6] - L'0'));
+    for (const auto& k : names)
+        if (ieq(n, k.name)) return k.vk;
+    return 0;
+}
+
+// the mouse
+enum { MS_HOLD, MS_SPEED };
+enum { MS_MENU_CURSOR, MS_MENU_LOOK, MS_MENU_OFF };
+bool g_ms_on = true, g_ms_invert = false, g_ms_lock = true, g_ms_clicks = true;
+int g_ms_style = MS_HOLD, g_ms_menu = MS_MENU_CURSOR;
+float g_ms_sens = 1, g_ms_return = 3, g_ms_delay = 0.3f, g_ms_menu_sens = 1;
+WORD g_ms_wheel_up = X_UP, g_ms_wheel_down = X_DOWN;
+std::atomic<LONG> g_ms_dx{0}, g_ms_dy{0}, g_ms_wheel{0};
+float g_ms_x = 0, g_ms_y = 0;
+bool g_ms_in_menu = false;
+int g_ms_notches = 0, g_ms_part = 0;
+double g_ms_moved_at = 0, g_ms_taken_at = 0, g_ms_press_until = 0;
+WORD g_ms_press = 0;
+bool g_ms_clipped = false;
+
+void load_kb_settings() {
+    g_kb_on           = ini_int(L"Keyboard", L"Enabled", 1) != 0;
+    g_kb_focus        = ini_int(L"Keyboard", L"OnlyWhenGameInFront", 1) != 0;
+    g_kb_steer_speed  = ini_float(L"Keyboard", L"SteerSpeed", 3.0f);
+    g_kb_steer_return = ini_float(L"Keyboard", L"SteerReturn", 5.0f);
+    g_kb_pedal        = ini_float(L"Keyboard", L"PedalSpeed", 8.0f);
+    g_kb_look         = ini_float(L"Keyboard", L"LookSpeed", 0.0f);
+    for (int c = 0; c < KB_COUNT; ++c) {
+        std::memset(g_kb_keys[c], 0, KB_MAX_KEYS);
+        const std::wstring list = ini_str(L"Keys", kKb[c].key, kKb[c].def);
+        int k = 0;
+        size_t i = 0;
+        while (i <= list.size()) {
+            size_t j = list.find(L',', i);
+            if (j == std::wstring::npos) j = list.size();
+            std::wstring name = list.substr(i, j - i);
+            while (!name.empty() && name.front() == L' ') name.erase(name.begin());
+            while (!name.empty() && name.back() == L' ') name.pop_back();
+            if (!name.empty()) {
+                const BYTE vk = vk_of(name);
+                if (vk && k < KB_MAX_KEYS) g_kb_keys[c][k++] = vk;
+                else if (!vk) plog("input: unknown key name in DualSense.ini [Keys]: " + narrow(name));
+            }
+            i = j + 1;
+        }
+    }
+    const wchar_t* m = L"Mouse";
+    g_ms_on        = g_kb_on && ini_int(m, L"Enabled", 1) != 0;
+    g_ms_style     = ieq(ini_str(m, L"Look", L"Hold"), L"Speed") ? MS_SPEED : MS_HOLD;
+    g_ms_sens      = ini_float(m, L"Sensitivity", 1.0f);
+    g_ms_return    = ini_float(m, L"Return", 3.0f);
+    g_ms_delay     = ini_float(m, L"ReturnAfter", 0.3f);
+    g_ms_invert    = ini_int(m, L"InvertY", 0) != 0;
+    g_ms_lock      = ini_int(m, L"KeepCursorInWindow", 1) != 0;
+    const std::wstring mm = ini_str(m, L"Menus", L"Cursor");
+    g_ms_menu      = ieq(mm, L"Look") ? MS_MENU_LOOK : ieq(mm, L"Off") ? MS_MENU_OFF : MS_MENU_CURSOR;
+    g_ms_menu_sens = ini_float(m, L"MenuSensitivity", 1.0f);
+    const std::wstring w = ini_str(m, L"Wheel", L"DPad");
+    if (ieq(w, L"Shoulders")) { g_ms_wheel_up = X_LB; g_ms_wheel_down = X_RB; }
+    else if (ieq(w, L"Off")) g_ms_wheel_up = g_ms_wheel_down = 0;
+    else { g_ms_wheel_up = X_UP; g_ms_wheel_down = X_DOWN; }
+    g_ms_clicks = ini_int(m, L"Clicks", 1) != 0;
+    plog(std::string("input: keyboard ") + (g_kb_on ? "on (it joins the game's gamepads at the first key press)" : "off") + ", mouse " +
+         (g_ms_on ? "on" : "off"));
+}
+
+double now_s() {
+    static LARGE_INTEGER f = [] { LARGE_INTEGER x; QueryPerformanceFrequency(&x); return x; }();
+    LARGE_INTEGER c;
+    QueryPerformanceCounter(&c);
+    return static_cast<double>(c.QuadPart) / static_cast<double>(f.QuadPart);
+}
+bool game_front() {
+    HWND w    = GetForegroundWindow();
+    DWORD pid = 0;
+    return w && GetWindowThreadProcessId(w, &pid) && pid == GetCurrentProcessId();
+}
+bool kb_down(int c) {
+    for (int k = 0; k < KB_MAX_KEYS && g_kb_keys[c][k]; ++k)
+        if (GetAsyncKeyState(g_kb_keys[c][k]) & 0x8000) return true;
+    return false;
+}
+bool kb_active() { return g_kb_on && (!g_kb_focus || game_front()); }
+bool kb_any() {
+    if (!kb_active()) return false;
+    for (int c = 0; c < KB_COUNT; ++c)
+        if (kb_down(c)) return true;
+    return false;
+}
+float approach(float v, float target, float rate, float dt) {
+    const float d = target - v, step = rate * dt;
+    if (rate <= 0 || (d <= step && d >= -step)) return target;
+    return v + (d > 0 ? step : -step);
+}
+float clamp1(float v) { return v > 1 ? 1 : v < -1 ? -1 : v; }
+
+// the menus: the car's feedback (a mod's driving_tick) isn't coming; unknown without such a mod (then the mouse looks around)
+bool in_menus() {
+    if (!g_shared || !g_shared->driving_tick) return false;
+    return GetTickCount() - g_shared->driving_tick > 350;
+}
+
+void ms_clip() {
+    HWND w = GetForegroundWindow();
+    DWORD pid = 0;
+    RECT r;
+    POINT p = {0, 0};
+    if (w) GetWindowThreadProcessId(w, &pid);
+    if (g_ms_lock && g_kb_joined.load() && g_ms_moved_at > 0 && w && pid == GetCurrentProcessId() && !IsIconic(w) && GetClientRect(w, &r) &&
+        r.right > r.left && r.bottom > r.top && ClientToScreen(w, &p)) {
+        OffsetRect(&r, p.x, p.y);
+        ClipCursor(&r);
+        g_ms_clipped = true;
+    } else if (g_ms_clipped) {
+        ClipCursor(nullptr);
+        g_ms_clipped = false;
+    }
+}
+LRESULT CALLBACK ms_wndproc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
+    if (m == WM_INPUT) {
+        RAWINPUT ri;
+        UINT n = sizeof ri;
+        if (GetRawInputData(reinterpret_cast<HRAWINPUT>(lp), RID_INPUT, &ri, &n, sizeof(RAWINPUTHEADER)) != static_cast<UINT>(-1) &&
+            ri.header.dwType == RIM_TYPEMOUSE) {
+            if (!(ri.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) && (ri.data.mouse.lLastX || ri.data.mouse.lLastY)) {
+                g_ms_dx += ri.data.mouse.lLastX;
+                g_ms_dy += ri.data.mouse.lLastY;
+            }
+            if (ri.data.mouse.usButtonFlags & RI_MOUSE_WHEEL) g_ms_wheel += static_cast<SHORT>(ri.data.mouse.usButtonData);
+        }
+    } else if (m == WM_TIMER) {
+        ms_clip();
+    }
+    return DefWindowProcW(w, m, wp, lp);
+}
+DWORD WINAPI ms_thread(LPVOID) {
+    WNDCLASSW wc{};
+    wc.lpfnWndProc   = ms_wndproc;
+    wc.hInstance     = GetModuleHandleW(nullptr);
+    wc.lpszClassName = L"FH3ModPlatformMouse";
+    RegisterClassW(&wc);
+    HWND w = CreateWindowExW(0, wc.lpszClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, wc.hInstance, nullptr);
+    RAWINPUTDEVICE rid{};
+    rid.usUsagePage = 0x01;
+    rid.usUsage     = 0x02;
+    rid.dwFlags     = RIDEV_INPUTSINK;
+    rid.hwndTarget  = w;
+    if (!w || !RegisterRawInputDevices(&rid, 1, sizeof rid)) {
+        plog("input: no raw mouse input (" + std::to_string(GetLastError()) + "): the mouse doesn't look around");
+        return 0;
+    }
+    SetTimer(w, 1, 250, nullptr);
+    MSG msg;
+    while (GetMessageW(&msg, nullptr, 0, 0) > 0) DispatchMessageW(&msg);
+    return 0;
+}
+WORD ms_wheel_buttons(bool menu, double now) {
+    const int w = static_cast<int>(g_ms_wheel.exchange(0));
+    if (!menu || !g_ms_wheel_up) { g_ms_part = g_ms_notches = 0; g_ms_press = 0; return 0; }
+    g_ms_part += w;
+    g_ms_notches += g_ms_part / 120;
+    g_ms_part %= 120;
+    g_ms_notches = std::max(-5, std::min(5, g_ms_notches));
+    if (now < g_ms_press_until) return g_ms_press;
+    if (now < g_ms_press_until + 0.05 || !g_ms_notches) return 0;
+    g_ms_press = g_ms_notches > 0 ? g_ms_wheel_up : g_ms_wheel_down;
+    g_ms_notches += g_ms_notches > 0 ? -1 : 1;
+    g_ms_press_until = now + 0.07;
+    return g_ms_press;
+}
+void ms_poll(bool in, double now, float dt, float st[4], WORD* buttons) {
+    st[0] = st[1] = st[2] = st[3] = 0;
+    if (!g_ms_on || !in) {
+        g_ms_dx = 0; g_ms_dy = 0; g_ms_wheel = 0;
+        g_ms_x = g_ms_y = 0;
+        return;
+    }
+    const bool menu = g_ms_menu != MS_MENU_LOOK && in_menus();
+    *buttons |= ms_wheel_buttons(menu, now);
+    if (menu && g_ms_clicks)
+        *buttons |= static_cast<WORD>(((GetAsyncKeyState(VK_LBUTTON) & 0x8000) ? X_A : 0) | ((GetAsyncKeyState(VK_RBUTTON) & 0x8000) ? X_B : 0));
+    if (menu != g_ms_in_menu) { g_ms_x = g_ms_y = 0; g_ms_in_menu = menu; }
+    if (menu && g_ms_menu == MS_MENU_OFF) { g_ms_dx = 0; g_ms_dy = 0; return; }
+    const bool speed = menu || g_ms_style == MS_SPEED;
+    if (speed) {
+        dt = static_cast<float>(now - g_ms_taken_at);
+        if (dt < 0.004f) { st[menu ? 0 : 2] = g_ms_x; st[menu ? 1 : 3] = g_ms_y; return; }
+        if (dt > 0.1f) dt = 0.1f;
+        g_ms_taken_at = now;
+    }
+    const float dx = static_cast<float>(g_ms_dx.exchange(0));
+    float dy       = static_cast<float>(g_ms_dy.exchange(0));
+    if (g_ms_invert && !menu) dy = -dy;
+    if (dx || dy) g_ms_moved_at = now;
+    if (!speed) {
+        g_ms_x = clamp1(g_ms_x + dx * g_ms_sens / 500.0f);
+        g_ms_y = clamp1(g_ms_y - dy * g_ms_sens / 500.0f);
+        if (now - g_ms_moved_at >= g_ms_delay) {
+            g_ms_x = approach(g_ms_x, 0, g_ms_return, dt);
+            g_ms_y = approach(g_ms_y, 0, g_ms_return, dt);
+        }
+    } else {
+        const float k = dt * 20.0f > 1 ? 1 : dt * 20.0f, sens = (menu ? g_ms_menu_sens : g_ms_sens) / 2000.0f;
+        g_ms_x += (clamp1(dx / dt * sens) - g_ms_x) * k;
+        g_ms_y += (clamp1(-dy / dt * sens) - g_ms_y) * k;
+        if (g_ms_x < 0.01f && g_ms_x > -0.01f && !dx) g_ms_x = 0;
+        if (g_ms_y < 0.01f && g_ms_y > -0.01f && !dy) g_ms_y = 0;
+    }
+    st[menu ? 0 : 2] = g_ms_x;
+    st[menu ? 1 : 3] = g_ms_y;
+}
+SHORT axis_s(float v) { v = clamp1(v); return static_cast<SHORT>(v >= 0 ? v * 32767.0f : v * 32768.0f); }
+
+// the keyboard's pad now (with the mouse on it)
+Virt kb_poll() {
+    Virt g;
+    if (!g_kb_on) return g;
+    if (!g_kb_joined.load() && kb_any()) {
+        g_kb_joined = true;
+        plog("input: the keyboard is in use: its gamepad joins the game's");
+    }
+    if (!g_kb_joined.load()) return g;
+    std::scoped_lock lk{g_kmu};
+    const double now = now_s();
+    float dt         = g_kb_last ? static_cast<float>(now - g_kb_last) : 0;
+    const bool in    = kb_active();
+    g_kb_last        = now;
+    if (dt > 0.1f) dt = 0.1f;
+    const float steer = in ? static_cast<float>(kb_down(KB_RIGHT) - kb_down(KB_LEFT)) : 0;
+    g_kb_steer = approach(g_kb_steer, steer, steer == 0 || steer * g_kb_steer < 0 ? g_kb_steer_return : g_kb_steer_speed, dt);
+    g_kb_thr   = approach(g_kb_thr, in && kb_down(KB_THROTTLE) ? 1.0f : 0.0f, g_kb_pedal, dt);
+    g_kb_brake = approach(g_kb_brake, in && kb_down(KB_BRAKE) ? 1.0f : 0.0f, g_kb_pedal, dt);
+    g_kb_lx    = approach(g_kb_lx, in ? static_cast<float>(kb_down(KB_LOOK_RIGHT) - kb_down(KB_LOOK_LEFT)) : 0, g_kb_look, dt);
+    g_kb_ly    = approach(g_kb_ly, in ? static_cast<float>(kb_down(KB_LOOK_UP) - kb_down(KB_LOOK_DOWN)) : 0, g_kb_look, dt);
+    float ms[4];
+    WORD btn = 0;
+    ms_poll(in, now, dt, ms, &btn);
+    g.lx = axis_s(g_kb_steer + ms[0]);
+    g.ly = axis_s((in ? static_cast<float>(kb_down(KB_STICK_UP) - kb_down(KB_STICK_DOWN)) : 0) + ms[1]);
+    g.rx = axis_s(g_kb_lx + ms[2]);
+    g.ry = axis_s(g_kb_ly + ms[3]);
+    g.rt = static_cast<BYTE>(g_kb_thr * 255.0f + 0.5f);
+    g.lt = static_cast<BYTE>(g_kb_brake * 255.0f + 0.5f);
+    if (in)
+        for (int c = 0; c < KB_COUNT; ++c)
+            if (kKb[c].button && kb_down(c)) btn |= kKb[c].button;
+    g.buttons = btn;
+    g.present = true;
+    return g;
+}
+
 // ---- a DualSense read straight from its HID device (USB and Bluetooth) -------------------------------------------------------
 // Over Bluetooth the controller sends the short report 0x01 until something asks for the full one (a program lighting it up,
 // FH2-Input, Steam); from then on it sends 0x31 only, and Windows' own gamepad list shows nothing of it. Reading the device
 // ourselves (a handle of its own: the game and every other program keep theirs) sees both, and USB too.
 bool is_ds(USHORT vid, USHORT pid) { return vid == 0x054C && (pid == 0x0CE6 || pid == 0x0DF2); }
 
-HANDLE hid_open(USHORT* in_len, bool* bt) {
+HANDLE hid_open(USHORT* in_len, bool* bt, bool* edge) {
     GUID guid;
     HidD_GetHidGuid(&guid);
     HDEVINFO set = SetupDiGetClassDevsW(&guid, nullptr, nullptr, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
@@ -423,6 +795,7 @@ HANDLE hid_open(USHORT* in_len, bool* bt) {
                 caps.InputReportByteLength <= 200) {
                 *in_len = caps.InputReportByteLength;
                 *bt     = caps.InputReportByteLength != 64;
+                *edge   = a.ProductID == 0x0DF2;
                 result  = h;
                 ok      = true;
             }
@@ -434,24 +807,29 @@ HANDLE hid_open(USHORT* in_len, bool* bt) {
     return result;
 }
 
-void hid_parse(const BYTE* b, DWORD n, bool bt, Virt& v) {
-    // the same fields in three layouts: USB 0x01 and Bluetooth 0x31 (X Y RX RY L2 R2 seq buttons0..2), Bluetooth 0x01 (short)
-    BYTE x, y, rx, ry, l2, r2, b0, b1;
-    if (b[0] == 0x31 && n >= 12) {
-        const BYTE* d = b + 2;
-        x = d[0]; y = d[1]; rx = d[2]; ry = d[3]; l2 = d[4]; r2 = d[5]; b0 = d[7]; b1 = d[8];
-    } else if (b[0] == 0x01 && !bt && n >= 11) {
-        const BYTE* d = b + 1;
-        x = d[0]; y = d[1]; rx = d[2]; ry = d[3]; l2 = d[4]; r2 = d[5]; b0 = d[7]; b1 = d[8];
-    } else if (b[0] == 0x01 && bt && n >= 10) {
-        x = b[1]; y = b[2]; rx = b[3]; ry = b[4]; b0 = b[5]; b1 = b[6]; l2 = b[8]; r2 = b[9];
+void hid_parse(const BYTE* rep, DWORD n, bool bt, bool edge, Virt& v) {
+    // the same fields in three layouts: USB 0x01 and Bluetooth 0x31 (the full report: X Y RX RY L2 R2 seq buttons0..3, then the
+    // gyro, the accelerometer, the touchpad, the battery), Bluetooth 0x01 (the short one: sticks, buttons, triggers)
+    const BYTE* r;
+    BYTE simple[64] = {};
+    bool full = true;
+    if (rep[0] == 0x31 && bt && n >= 78) r = rep + 2;
+    else if (rep[0] == 0x01 && !bt && n >= 64) r = rep + 1;
+    else if (rep[0] == 0x01 && bt && n >= 10) {
+        simple[0] = rep[1]; simple[1] = rep[2]; simple[2] = rep[3]; simple[3] = rep[4];
+        simple[4] = rep[8]; simple[5] = rep[9];
+        simple[7] = rep[5]; simple[8] = rep[6]; simple[9] = rep[7];
+        r    = simple;
+        full = false;
     } else {
         return;
     }
+    const BYTE b0 = r[7], b1 = r[8], b2 = r[9];
+    const WORD cross = S.swap ? X_B : X_A, circle = S.swap ? X_A : X_B;
     WORD btn = 0;
     if (b0 & 0x10) btn |= X_X;
-    if (b0 & 0x20) btn |= X_A;
-    if (b0 & 0x40) btn |= X_B;
+    if (b0 & 0x20) btn |= cross;
+    if (b0 & 0x40) btn |= circle;
     if (b0 & 0x80) btn |= X_Y;
     switch (b0 & 0x0F) {
         case 0: btn |= X_UP; break;
@@ -466,37 +844,85 @@ void hid_parse(const BYTE* b, DWORD n, bool bt, Virt& v) {
     }
     if (b1 & 0x01) btn |= X_LB;
     if (b1 & 0x02) btn |= X_RB;
-    if (b1 & 0x10) btn |= X_BACK;
+    if (b1 & 0x10) btn |= S.create;
     if (b1 & 0x20) btn |= X_START;
     if (b1 & 0x40) btn |= X_LS;
     if (b1 & 0x80) btn |= X_RS;
-    // 0..255 around 128 onto -32768..32767 (a plain *257 wraps at 0 and turns a full left into a full right)
-    auto st = [](BYTE c) { const int d = static_cast<int>(c) - 128; return static_cast<SHORT>(d < 0 ? d * 256 : d * 258); };
-    v.buttons = btn;
-    v.lt = l2;
-    v.rt = r2;
-    if (bt && b[0] == 0x01) { // the short report's triggers can be missing: the digital ones then
-        if (!l2 && (b1 & 0x04)) v.lt = 255;
-        if (!r2 && (b1 & 0x08)) v.rt = 255;
+    if (b2 & 0x02) btn |= S.touch;
+    if (edge) {
+        if (b2 & 0x10) btn |= S.lfn;
+        if (b2 & 0x20) btn |= S.rfn;
+        if (b2 & 0x40) btn |= S.lpaddle;
+        if (b2 & 0x80) btn |= S.rpaddle;
     }
-    v.lx = st(x);
-    auto inv = [](SHORT a) { return static_cast<SHORT>(a == -32768 ? 32767 : -a); }; // -(-32768) doesn't fit a SHORT
-    v.ly = inv(st(y));
-    v.rx = st(rx);
-    v.ry = inv(st(ry));
+    // 0..255 around 128 onto -1..1
+    auto stick = [](BYTE c) { return c >= 128 ? (c - 128) / 127.0f : (c - 128) / 128.0f; };
+    float lx = stick(r[0]);
+    // the mic button: gyro steering on/off
+    const bool mic = (b2 & 0x04) != 0;
+    if (mic && !T.mic_was && S.gyro == 1) {
+        T.gyro_on = !T.gyro_on;
+        T.have_g  = false;
+        plog(std::string("input: gyro steering ") + (T.gyro_on ? "on" : "off"));
+    }
+    T.mic_was = mic;
+    if (g_shared) g_shared->gyro_on = (S.gyro == 2 || (S.gyro == 1 && T.gyro_on)) ? 1 : 0;
+    const ULONGLONG now = GetTickCount64();
+    if (full) {
+        // the touchpad, finger 1: a swipe is a D-pad press in its direction
+        const BYTE* pt = r + 32;
+        const bool touch = !(pt[0] & 0x80);
+        const int x = pt[1] | (pt[2] & 0x0F) << 8, y = pt[2] >> 4 | pt[3] << 4;
+        if (touch && !T.touching) {
+            T.x0 = x; T.y0 = y; T.swiped = false;
+        } else if (touch && !T.swiped && S.swipes) {
+            const int dx = x - T.x0, dy = y - T.y0;
+            if (dx * dx > 350 * 350 || dy * dy > 220 * 220) {
+                T.swiped = true;
+                T.pulse  = std::abs(dx) * 1080 > std::abs(dy) * 1920 ? (dx > 0 ? X_RIGHT : X_LEFT) : (dy > 0 ? X_DOWN : X_UP);
+                T.pulse_until = now + 120;
+            }
+        }
+        T.touching = touch;
+        // gyro steering: the tilt (roll) from the accelerometer, filtered, from where it was when switched on
+        if (S.gyro == 2 || (S.gyro == 1 && T.gyro_on)) {
+            float a[3];
+            for (int i = 0; i < 3; ++i) a[i] = static_cast<float>(static_cast<SHORT>(r[21 + 2 * i] | r[22 + 2 * i] << 8));
+            if (!T.have_g) for (int i = 0; i < 3; ++i) T.g[i] = a[i];
+            else for (int i = 0; i < 3; ++i) T.g[i] += (a[i] - T.g[i]) * 0.15f;
+            const float m = std::sqrt(T.g[0] * T.g[0] + T.g[1] * T.g[1] + T.g[2] * T.g[2]);
+            const float roll = m > 1000 ? std::asin(std::max(-1.0f, std::min(1.0f, T.g[0] / m))) * 57.29578f : 0;
+            if (!T.have_g) {
+                T.neutral = roll;
+                T.have_g  = true;
+            }
+            float steer = -(roll - T.neutral) / S.gyro_max;
+            if (S.gyro_invert) steer = -steer;
+            lx += steer;
+        }
+    }
+    if (now < T.pulse_until) btn |= T.pulse;
+    v.buttons = btn;
+    v.lt      = r[4];
+    v.rt      = r[5];
+    v.lx      = axis_s(lx);
+    v.ly      = axis_s(-stick(r[1]));
+    v.rx      = axis_s(stick(r[2]));
+    v.ry      = axis_s(-stick(r[3]));
     v.present = true;
 }
 
 DWORD WINAPI hid_reader(LPVOID) {
     for (;;) {
         USHORT in_len = 0;
-        bool bt       = false;
-        HANDLE h      = hid_open(&in_len, &bt);
+        bool bt = false, edge = false;
+        HANDLE h      = hid_open(&in_len, &bt, &edge);
         if (h == INVALID_HANDLE_VALUE) {
             Sleep(2000);
             continue;
         }
-        plog(std::string("input: DualSense read directly over ") + (bt ? "Bluetooth" : "USB"));
+        plog(std::string("input: DualSense") + (edge ? " Edge" : "") + " read directly over " + (bt ? "Bluetooth" : "USB"));
+        T = DsState{};
         OVERLAPPED ov{};
         ov.hEvent    = CreateEventW(nullptr, TRUE, FALSE, nullptr);
         bool pending = false;
@@ -513,7 +939,7 @@ DWORD WINAPI hid_reader(LPVOID) {
             if (w != WAIT_OBJECT_0 || !GetOverlappedResult(h, &ov, &n, FALSE)) break;
             pending = false;
             Virt v;
-            hid_parse(buf, n, bt, v);
+            hid_parse(buf, n, bt, edge, v);
             if (v.present) {
                 std::scoped_lock lk{g_hmu};
                 v.packet = g_hid.packet + 1;
@@ -595,12 +1021,13 @@ Virt combine() {
         std::scoped_lock lk{g_hmu};
         add(g_hid);
     }
+    add(kb_poll());
     return v;
 }
 
 DWORD WINAPI detour_get_state(DWORD idx, PadState* s) {
     const DWORD r = g_real(idx, s);
-    if (!s || idx > 3 || !(g_present.load(std::memory_order_relaxed) || g_hid_present.load(std::memory_order_relaxed))) return r;
+    if (!s || idx > 3 || !(g_present.load(std::memory_order_relaxed) || g_hid_present.load(std::memory_order_relaxed) || g_kb_joined.load())) return r;
     if (r != ERROR_SUCCESS && idx != 0) return r;
     if (!caller_is_mod(__builtin_return_address(0))) return r;
     const Virt v = combine();
@@ -664,11 +1091,6 @@ struct WgiPad {
     volatile LONG refs;
 };
 
-struct SharedVib {
-    float lm, rm, lt, rt;
-    DWORD tick;
-};
-SharedVib* g_shared_vib = nullptr;
 WgiVibration g_vib{};
 std::mutex g_wmu;
 
@@ -710,12 +1132,12 @@ HRESULT STDMETHODCALLTYPE pad_put_vibration(WgiPad*, const WgiVibration* v) {
         std::scoped_lock lk{g_wmu};
         g_vib = *v;
     }
-    if (g_shared_vib) {
-        g_shared_vib->lm   = unit01(v->lm);
-        g_shared_vib->rm   = unit01(v->rm);
-        g_shared_vib->lt   = unit01(v->lt);
-        g_shared_vib->rt   = unit01(v->rt);
-        g_shared_vib->tick = GetTickCount();
+    if (g_shared) {
+        g_shared->lm   = unit01(v->lm);
+        g_shared->rm   = unit01(v->rm);
+        g_shared->lt   = unit01(v->lt);
+        g_shared->rt   = unit01(v->rt);
+        g_shared->tick = GetTickCount();
     }
     return S_OK;
 }
@@ -849,7 +1271,8 @@ DWORD WINAPI wgi_thread(LPVOID) {
             next_real = t + 500;
             real      = real_xinput_pad();
         }
-        const bool want = !real && (g_present.load(std::memory_order_relaxed) || g_hid_present.load(std::memory_order_relaxed));
+        const bool want = (!real && (g_present.load(std::memory_order_relaxed) || g_hid_present.load(std::memory_order_relaxed))) ||
+                         (g_kb_on && (g_kb_joined.load() || kb_any()));
         if (want == g_pad_in) continue;
         if (want && !*g_eng_statics) continue; // the engine's pads aren't up yet
         const HRESULT hr = wgi_invoke(want);
@@ -900,9 +1323,13 @@ void start_input() {
         return;
     }
     read_ignore();
+    if (HANDLE m = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 64, L"Local\\FH3ModPlatform.Vibration"))
+        g_shared = static_cast<Shared*>(MapViewOfFile(m, FILE_MAP_ALL_ACCESS, 0, 0, 64));
+    load_controller_settings();
+    load_kb_settings();
+    if (g_ms_on)
+        if (HANDLE t = CreateThread(nullptr, 0, ms_thread, nullptr, 0, nullptr)) CloseHandle(t);
     if (setting(L"Gamepad", true)) {
-        if (HANDLE m = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 64, L"Local\\FH3ModPlatform.Vibration"))
-            g_shared_vib = static_cast<SharedVib*>(MapViewOfFile(m, FILE_MAP_ALL_ACCESS, 0, 0, 64));
         if (HANDLE t = CreateThread(nullptr, 0, wgi_thread, nullptr, 0, nullptr)) CloseHandle(t);
     } else {
         plog("input: the controller is not given to the game (platform.ini [input] Gamepad=0)");

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(fh3_dualsense VERSION 1.0.0 LANGUAGES C CXX)
+project(fh3_dualsense VERSION 1.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,7 +21,7 @@ target_compile_definitions(dualsense PRIVATE
     DUALSENSE_VERSION="${PROJECT_VERSION}"
     FH3MOD_PLATFORM_VERSION="${FH3_PLATFORM_VERSION}"
     UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_link_libraries(dualsense PRIVATE setupapi hid)
+target_link_libraries(dualsense PRIVATE setupapi hid ole32 winmm)
 if(NOT MSVC)
     # -fms-extensions: __try/__except around reads of game memory.
     target_compile_options(dualsense PRIVATE -Wall -Wextra -fms-extensions "$<$<CONFIG:Release>:-O2>")
