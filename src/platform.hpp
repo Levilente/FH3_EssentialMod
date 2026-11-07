@@ -35,6 +35,11 @@ namespace fh3platform {
 // One line to platform.log; `who` is a mod name, or "" for the platform.
 void log_line(const std::string& who, const std::string& text);
 inline void plog(const std::string& text) { log_line("", text); }
+// The platform's detailed lines (shop steps, garage reads, car builds, units): only with fh3-mods\platform.ini
+// [log] Verbose=1 (off by default; for bug reports).
+bool log_verbose();
+inline void vlog_line(const std::string& who, const std::string& text) { if (log_verbose()) log_line(who, text); }
+inline void vplog(const std::string& text) { if (log_verbose()) log_line("", text); }
 
 // hooks.cpp: hooks a function of the game for the platform itself (blocks until the game's code is ready, so call
 // it from its own thread). Returns the trampoline to the original, or nullptr.

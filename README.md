@@ -69,6 +69,7 @@ Mods built on the platform ship it in their own zips, so most players never need
 | | `[Sell] UpgradePercent` | `30` | Percent of what you paid for the car's upgrades you get (0-100). |
 | | `[Sell] CreditReason` | `1` | The reason code the game records with the credit payment. |
 | `platform-units.ini` | `[units] Speed`, `Power` | `0` | The two unit rows (0 = automatic); written by the settings rows. |
+| `platform.ini` | `[log] Verbose` | `0` | `1` writes the platform's detailed lines to `platform.log` (hooks, shop steps, garage reads, car builds); for bug reports. Problems are always logged. |
 
 Restart the game after editing an ini by hand.
 

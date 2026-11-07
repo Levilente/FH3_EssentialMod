@@ -26,3 +26,4 @@ First release of the **FH3 Mod Platform**, a fork of Trinculo54's FH2 Mod Platfo
 - **Sell Car**: *SELL CAR* after *Remove car from garage* in a car's action menu; pays a share of the model's price and of what was paid for its upgrades (`platform-sellcar.ini`).
 - **Exit to Desktop** shows the game's own saving popup.
 - The start-up videos are skipped.
+- A short `platform.log` by default (start-up, mods, problems); `fh3-mods\platform.ini` `[log] Verbose=1` adds the detailed lines (hooks, file overrides, shop steps, garage reads, car builds, units).

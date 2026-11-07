@@ -157,7 +157,7 @@ int set_file(FH3Mod* mod, const char* media_path, const void* data, std::size_t 
     if (known != manifest.end()) manifest.erase(known);
     manifest[rel] = mod->name;
     write_files_manifest(manifest);
-    log_line(mod->name, (same ? "replaces " : "replaced ") + shown(rel) + " (" + std::to_string(size) + " bytes)");
+    vlog_line(mod->name, (same ? "replaces " : "replaced ") + shown(rel) + " (" + std::to_string(size) + " bytes)");
     return 1;
 }
 

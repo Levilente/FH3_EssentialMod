@@ -82,7 +82,7 @@ bool take_snapshot(uint8_t* t) {
     {
         char b[160];
         std::snprintf(b, sizeof b, "unit table at %p: %zu speed/power rows", static_cast<void*>(t), s.size());
-        log_line("units", b);
+        vlog_line("units", b);
         for (int sys = 0; sys < kSystems && readable(row(t, sys, 0), kRowSize); ++sys) {
             std::string ids;
             for (int k = 0; k < kKinds; ++k) {
@@ -90,10 +90,10 @@ bool take_snapshot(uint8_t* t) {
                 std::memcpy(&id, row(t, sys, k) + 4, 4);
                 ids += std::to_string(id) + " ";
             }
-            log_line("units", "system " + std::to_string(sys) + " ids: " + ids);
+            vlog_line("units", "system " + std::to_string(sys) + " ids: " + ids);
         }
         for (const Snap& r : s)
-            log_line("units", "row sys " + std::to_string(r.sys) + " kind " + std::to_string(r.kind) + " id " + std::to_string(r.id));
+            vlog_line("units", "row sys " + std::to_string(r.sys) + " kind " + std::to_string(r.kind) + " id " + std::to_string(r.id));
     }
     if (s.empty()) return false;
     std::scoped_lock lk{g_mu};
@@ -143,7 +143,7 @@ void write_rows(uint8_t* t) {
             const Snap& use = donor ? *donor : s;
             uint8_t* r      = row(t, s.sys, s.kind);
             if (read_u32(r + 4) != use.id)
-                log_line("units", "sys " + std::to_string(s.sys) + " kind " + std::to_string(s.kind) + ": " + std::to_string(s.id) + " -> " + std::to_string(use.id));
+                vlog_line("units", "sys " + std::to_string(s.sys) + " kind " + std::to_string(s.kind) + ": " + std::to_string(s.id) + " -> " + std::to_string(use.id));
             put_row(r, use.id, use.fmt, use.label);
         }
     }
@@ -157,10 +157,10 @@ void worker() {
         if (idle < 6 || (idle % 30) == 0) {
             char b[120];
             std::snprintf(b, sizeof b, "table pointer %p, readable %d, snapshot %d", static_cast<void*>(t), t && readable(t, 64) ? 1 : 0, have ? 1 : 0);
-            log_line("units", b);
+            vlog_line("units", b);
             auto* base = static_cast<uint8_t*>(find_game());
             MEMORY_BASIC_INFORMATION mbi{};
-            if (!base) { log_line("units", "the game isn't found yet"); }
+            if (!base) { vlog_line("units", "the game isn't found yet"); }
             const bool ok = base && VirtualQuery(base + 0x4E7DD90, &mbi, sizeof mbi) != 0;
             std::string q = "module " + std::to_string(reinterpret_cast<std::uintptr_t>(base)) + ", query " + (ok ? "ok" : "failed") +
                             ", state " + std::to_string(ok ? mbi.State : 0) + ", protect " + std::to_string(ok ? mbi.Protect : 0) +
@@ -172,7 +172,7 @@ void worker() {
                     std::snprintf(h, sizeof h, " %llx", *reinterpret_cast<unsigned long long*>(base + 0x4E7DD90 + 8 * i));
                     q += h;
                 }
-            log_line("units", q);
+            vlog_line("units", q);
         }
         ++idle;
         if (t && readable(t, 64)) {

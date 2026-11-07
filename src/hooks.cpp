@@ -639,7 +639,7 @@ FH3Hook* add_hook(FH3Mod* m, const char* name, Site* s, void* detour, void** ori
         raw->record = g_nrecords;
         InterlockedIncrement(&g_nrecords);
     }
-    log_line(m->name, "hooked " + describe(raw) +
+    vlog_line(m->name, "hooked " + describe(raw) +
                           (s->chain.size() > 1 ? " (shared with " + owners(s) + ")" : ""));
     return raw;
 }
@@ -933,7 +933,7 @@ int switch_hooks(FH3Mod* m, FH3Hook* hook, bool on) {
     int count = 0;
     for (FH3Hook* h : mine) count += h->enabled == on;
     if (count)
-        log_line(m->name, std::string(on ? "enabled " : "disabled ") + std::to_string(count) +
+        vlog_line(m->name, std::string(on ? "enabled " : "disabled ") + std::to_string(count) +
                               (count == 1 ? " hook" : " hooks") +
                               (hook ? " (" + describe(hook) + ")" : std::string{}));
     return ok;
@@ -1623,7 +1623,7 @@ void* hook_game_function_shared(uint32_t rva, void* detour, const char* what, vo
         plog(std::string("can't hook ") + what + " (shared) at game+" + hex(rva));
         return nullptr;
     }
-    plog(std::string("hooked ") + what + " (shared) at game+" + hex(rva));
+    vplog(std::string("hooked ") + what + " (shared) at game+" + hex(rva));
     return original ? *original : nullptr;
 }
 
@@ -1686,7 +1686,7 @@ void* hook_game_function(uint32_t rva, void* detour, const char* what, void** or
         plog(std::string("can't hook ") + what + ": " + MH_StatusToString(st));
         return nullptr;
     }
-    plog(std::string("hooked ") + what + " at game+" + hex(rva));
+    vplog(std::string("hooked ") + what + " at game+" + hex(rva));
     return tramp;
 }
 

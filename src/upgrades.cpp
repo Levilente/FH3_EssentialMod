@@ -174,7 +174,7 @@ void activate(unsigned gid, const char* why = "") {
     if (gid == 0 || gid >= 2000000000u) return;
     if (gid == g_active.load()) {
         if (g_foreign.exchange(false)) {   // back in the player's own car
-            plog("upgrades: driven car is garage " + std::to_string(gid) + " again (" + why + ")");
+            vplog("upgrades: driven car is garage " + std::to_string(gid) + " again (" + why + ")");
             const int n = g_count.load();
             for (int i = 0; i < n; ++i) notify(g_up[i], gid, get_stage(g_up[i], gid, 0));
         }
@@ -184,7 +184,7 @@ void activate(unsigned gid, const char* why = "") {
     g_expect_build.store(GetTickCount64());
     clear_previews();
     for (int i = 0; i < g_count.load(); ++i) g_up[i]->pend.store(false);   // a basket belongs to the car it was filled for
-    plog("upgrades: driven car is garage " + std::to_string(gid) + " (was " + std::to_string(g_active.load()) + ", " + why + ")");
+    vplog("upgrades: driven car is garage " + std::to_string(gid) + " (was " + std::to_string(g_active.load()) + ", " + why + ")");
     g_active.store(gid);
     WritePrivateProfileStringW(L"general", L"LastGarage", wnum(gid).c_str(), ini_path().c_str());
     const int n = g_count.load();
@@ -281,7 +281,7 @@ void ensure_owned(void* db, const Upgrade* u, long gid) {
     const int r = reinterpret_cast<ExecFn>(game() + 0x421D0)(db, q.c_str(), nullptr, nullptr, nullptr);
     t_in_repair = false;
     static std::atomic<int> lg{0};
-    if (lg.fetch_add(1) < 4) plog("upgrades: owned rows for garage " + std::to_string(gid) + " (" + u->id + ", mask " + std::to_string(mask) + "), exec " + std::to_string(r));
+    if (lg.fetch_add(1) < 4) vplog("upgrades: owned rows for garage " + std::to_string(gid) + " (" + u->id + ", mask " + std::to_string(mask) + "), exec " + std::to_string(r));
 }
 
 // A save that still holds one of our ids in a part column crashes the game on load (no real part behind it).
@@ -333,7 +333,7 @@ void refresh_garage_map(void* db) {
         before = g_gar_car.size();
         g_gar_car.swap(m);
     }
-    if (before != g_gar_car.size()) plog("upgrades: the player's garage has " + std::to_string(g_gar_car.size()) + " cars");
+    if (before != g_gar_car.size()) vplog("upgrades: the player's garage has " + std::to_string(g_gar_car.size()) + " cars");
 }
 
 // Only the statements the game runs when it puts the player into a garage car count ("... AND IsCarInstalled(Car)",
@@ -348,7 +348,7 @@ void touch_garage(long gid, const char* z) {
     }
     static std::atomic<long> last{0};
     static std::atomic<int> lines{0};
-    if (last.exchange(gid) != gid && lines.fetch_add(1) < 120) plog("upgrades: the game reads garage car " + std::to_string(gid) + " (" + std::string(z, strnlen(z, 70)) + ")");
+    if (last.exchange(gid) != gid && lines.fetch_add(1) < 120) vplog("upgrades: the game reads garage car " + std::to_string(gid) + " (" + std::string(z, strnlen(z, 70)) + ")");
 }
 
 // The game's statements on the player's garage: note the garage id they name; refresh the map now and then.
@@ -577,7 +577,7 @@ void* detour_show(uint64_t car, uint64_t e, uint64_t part, uint64_t d, uint64_t 
                     u->preview.store(-1);
                 }
                 if (g_show_logged.fetch_add(1) < 300)
-                    plog("upgrades: " + u->id + (s >= 0 && s < u->count() ? " stage " + std::to_string(s) + " shown in the shop (preview)"
+                    vplog("upgrades: " + u->id + (s >= 0 && s < u->count() ? " stage " + std::to_string(s) + " shown in the shop (preview)"
                                                                        : " back to the fitted stage (part " + std::to_string(static_cast<int>(part)) + ")"));
             }
         } else {
@@ -608,7 +608,7 @@ void* detour_rebuild(void* car, void* x, int y) {
         char buf[160];
         snprintf(buf, sizeof buf, "upgrades: car rebuilt (caller game+0x%llX, preview %s)", static_cast<unsigned long long>(gb && ret > gb ? ret - gb : 0),
                  pv >= 0 ? "on" : "off");
-        plog(buf);
+        vplog(buf);
     }
     return g_orig_rebuild(car, x, y);
 }
@@ -638,7 +638,7 @@ void* detour_setup(uint64_t car, uint64_t set, uint64_t c, uint64_t d, uint64_t 
             char buf[160];
             snprintf(buf, sizeof buf, "upgrades: the shop put a setup on the car (caller game+0x%llX): preview ended",
                      static_cast<unsigned long long>(gb && ret > gb ? ret - gb : 0));
-            plog(buf);
+            vplog(buf);
         }
     }
     return g_orig_setup(car, set, c, d, e, f, g, h, i);
@@ -679,7 +679,7 @@ void detour_partset(int e, int part, int c, int d, void* set, void* changes) {
             char buf[160];
             snprintf(buf, sizeof buf, "upgrades: kept part %d (enum %d) out of the game's part set (caller game+0x%llX)", part, e,
                      static_cast<unsigned long long>(gb && ret > gb ? ret - gb : 0));
-            plog(buf);
+            vplog(buf);
         }
         return;
     }
@@ -752,7 +752,7 @@ void* detour_add(ARGS12) {
             u->pend.store(st != get_stage(u, gid, 0));   // choosing the stage the car has is no change
             static std::atomic<int> add_logged{0};
             if (add_logged.fetch_add(1) < 200)
-                plog("upgrades: basket add of " + u->id + " stage " + std::to_string(st) + " (fitted " + std::to_string(get_stage(u, gid, 0)) +
+                vplog("upgrades: basket add of " + u->id + " stage " + std::to_string(st) + " (fitted " + std::to_string(get_stage(u, gid, 0)) +
                      ", " + (is_owned(u, gid, st) ? "owned" : "not owned") + ", waiting " + (u->pend.load() ? "yes" : "no") + ")");
             // Owned stages go into the game's basket like any owned part: at 0 CR, replacing what was waiting for that slot
             // (the game's rows say they are owned, see ensure_owned), and the commit below fits them without a charge.
@@ -803,7 +803,7 @@ void* detour_commit(ARGS12) {
         bool any = false;
         const int nn = g_count.load();
         for (int q = 0; q < nn; ++q) any |= g_up[q]->pend.load();
-        if (cm_logged.fetch_add(1) < 100) plog(std::string("upgrades: shop commit (a stage was waiting: ") + (any ? "yes" : "no") + ", flag " + std::to_string(static_cast<int>(b & 0xFF)) + ")");
+        if (cm_logged.fetch_add(1) < 100) vplog(std::string("upgrades: shop commit (a stage was waiting: ") + (any ? "yes" : "no") + ", flag " + std::to_string(static_cast<int>(b & 0xFF)) + ")");
     }
     std::wstring short_msg;   // an upgrade of ours that the credits didn't cover: said in a message box after the commit
     void* short_page = nullptr;
@@ -824,7 +824,7 @@ void* detour_commit(ARGS12) {
         if (!pg || gid <= 0) continue;
         if (is_owned(u, gid, st)) {
             set_stage(u, gid, g_cur_ord.load(), st);
-            plog("upgrades: " + u->id + " stage " + std::to_string(st) + " fitted (owned, no charge) on garage " + std::to_string(gid));
+            vplog("upgrades: " + u->id + " stage " + std::to_string(st) + " fitted (owned, no charge) on garage " + std::to_string(gid));
         } else if (sess && st > 0) {
             const int r = buy_guarded(sess, gid, u, st);
             if (r == 1) {
@@ -862,7 +862,7 @@ void* detour_afford(ARGS12) {
     }
     if (extra > 0) {
         static int logged = 0;
-        if (logged++ < 6) plog("upgrades: the shop's cost check: " + std::to_string(static_cast<uint32_t>(b)) + " + " + std::to_string(extra) + " for the upgrade(s) of mods");
+        if (logged++ < 6) vplog("upgrades: the shop's cost check: " + std::to_string(static_cast<uint32_t>(b)) + " + " + std::to_string(extra) + " for the upgrade(s) of mods");
         b = static_cast<uint32_t>(static_cast<uint32_t>(b) + static_cast<uint32_t>(extra));
     }
     return g_orig_afford(PASS12);
@@ -874,7 +874,7 @@ void* detour_abandon(ARGS12) {
         static std::atomic<int> ab_logged{0};
         bool any = false;
         for (int q = 0; q < n; ++q) any |= g_up[q]->pend.load();
-        if (ab_logged.fetch_add(1) < 100) plog(std::string("upgrades: shop setup abandoned (a stage was waiting: ") + (any ? "yes" : "no") + ")");
+        if (ab_logged.fetch_add(1) < 100) vplog(std::string("upgrades: shop setup abandoned (a stage was waiting: ") + (any ? "yes" : "no") + ")");
     }
     for (int q = 0; q < n; ++q) g_up[q]->pend.store(false);
     clear_previews();
@@ -1115,7 +1115,7 @@ bool build_is_players(long gid, long model) {
     if (lines.fetch_add(1) < 200) {
         char b[220];
         snprintf(b, sizeof b, "upgrades: car %p (model %ld) is built: %s garage car %ld (%s)", static_cast<void*>(c), model, mine ? "the player's," : "someone else's, not", gid, why);
-        plog(b);
+        vplog(b);
     }
     return mine;
 }
@@ -1199,13 +1199,13 @@ void driven_car_seen(int32_t car_id, char* car) {
     if (g > 0) {
         if (g_foreign.load()) activate(static_cast<unsigned>(g), "the player's car again");
     } else if (!g_foreign.exchange(true)) {
-        plog("upgrades: the driven car (Data_Car " + std::to_string(car_id) + ") isn't one of the player's cars: no custom upgrades on it");
+        vplog("upgrades: the driven car (Data_Car " + std::to_string(car_id) + ") isn't one of the player's cars: no custom upgrades on it");
         clear_previews();
         const int n = g_count.load();
         for (int i = 0; i < n; ++i) notify(g_up[i], 0, 0);
     }
     if (last.exchange(car_id) != car_id)
-        plog("upgrades: the player drives Data_Car " + std::to_string(car_id) + (g > 0 ? ", garage car " + std::to_string(g) : std::string(", not one of the player's cars")));
+        vplog("upgrades: the player drives Data_Car " + std::to_string(car_id) + (g > 0 ? ", garage car " + std::to_string(g) : std::string(", not one of the player's cars")));
 }
 
 uint64_t detour_hud(void* c, void* a, void* b, void* d) {

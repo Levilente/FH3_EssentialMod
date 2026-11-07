@@ -99,6 +99,19 @@ void log_line(const std::string& who, const std::string& text) {
         std::fflush(f);
     }
 }
+std::atomic<int> g_verbose{-1};
+bool log_verbose() {
+    int v = g_verbose.load();
+    if (v < 0) {
+        const std::wstring ini = (g_azimuth / "fh3-mods" / "platform.ini").wstring();
+        wchar_t buf[16] = L"";
+        GetPrivateProfileStringW(L"log", L"Verbose", L"", buf, 16, ini.c_str());
+        if (!buf[0]) WritePrivateProfileStringW(L"log", L"Verbose", L"0", ini.c_str());
+        v = buf[0] && buf[0] != L'0' ? 1 : 0;
+        g_verbose.store(v);
+    }
+    return v == 1;
+}
 fs::path azimuth_dir() { return g_azimuth; }
 fs::path game_mount() { return g_game; }
 
@@ -827,6 +840,7 @@ DWORD WINAPI load_mods(LPVOID) {
          ") in " + narrow(g_azimuth.wstring()));
     plog("loaded as " + narrow(g_self_name) + (g_copies.empty() ? "" : "; " + g_copies));
     plog(session_line());
+    plog(std::string("detailed log ") + (log_verbose() ? "on" : "off") + " (fh3-mods\\platform.ini [log] Verbose)");
     plog(g_game.empty() ? "couldn't find the game's Mount folder; game text, file and database changes are off"
                         : "game folder " + narrow(g_game.wstring()));
     // Azimuth 1.0.1 runs other Forza games too. Told to start one of those straight away, the
