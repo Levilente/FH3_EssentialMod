@@ -966,6 +966,7 @@ GetStateFn g_real = nullptr; // MinHook's trampoline to the real XInputGetState
 
 HMODULE g_self = nullptr;
 std::wstring g_mods_dir; // lower case, with a trailing backslash
+std::wstring g_game_dir; // the Azimuth folder, lower case, with a trailing backslash
 std::mutex g_cmu;
 std::unordered_map<HMODULE, bool> g_caller_cache;
 
@@ -976,6 +977,10 @@ void note_self() {
     std::transform(d.begin(), d.end(), d.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
     if (!d.empty() && d.back() != L'\\') d += L'\\';
     g_mods_dir = d;
+    std::wstring g = azimuth_dir().wstring();
+    std::transform(g.begin(), g.end(), g.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+    if (!g.empty() && g.back() != L'\\') g += L'\\';
+    g_game_dir = g;
 }
 
 // A mod (a DLL in fh3-mods) or the platform itself?
@@ -995,6 +1000,13 @@ bool caller_is_mod(void* ra) {
         std::wstring p = path;
         std::transform(p.begin(), p.end(), p.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
         mod = p.size() > g_mods_dir.size() && p.compare(0, g_mods_dir.size(), g_mods_dir) == 0;
+        // Other DLLs that sit next to azimuth.exe (Extra Options' azimuth-tls.dll reads XInput directly for the minimap's
+        // right-stick rotation and the garage's View button) get the controller too; the game's own executables do not.
+        if (!mod && h != GetModuleHandleW(nullptr) && p.size() > g_game_dir.size() && p.compare(0, g_game_dir.size(), g_game_dir) == 0 &&
+            p.size() > 4 && p.compare(p.size() - 4, 4, L".dll") == 0) {
+            const std::wstring rest = p.substr(g_game_dir.size());
+            mod = rest.find(L'\\') == std::wstring::npos || rest.find(L"azimuth") != std::wstring::npos;
+        }
     }
     std::scoped_lock lk{g_cmu};
     g_caller_cache[h] = mod;
