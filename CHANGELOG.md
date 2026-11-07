@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1
+
+- Extra Options (and any other DLL next to azimuth.exe) reads the controller too: the minimap follows the right stick, the garage's Manufacturer (View) button works with a DualSense.
+- The platform times real use of an XInput pad (shared with the DualSense mod, so the device in use can be told).
+- The DualSense mod moved to its own repository, Levilente/FH3_DualSense.
+
 ## 1.1.0
 
 - **Every controller for the mods.** Mods and hotkeys read pads with XInput, which only lists Xbox-like controllers, so a DualSense, a DualShock 4 or any other HID gamepad that isn't presented to Windows as an Xbox 360 pad (ViGEm, DS4Windows, Steam Input) did nothing for Nitro, Airride, Launch Control or a mod's hotkey. The platform now reads those controllers itself (Windows.Gaming.Input RawGameController: USB or Bluetooth, no driver) and adds them to `XInputGetState` for the mods only (DLLs in `fh3-mods`, and the platform's own hotkeys): joined to a real XInput pad's buttons, or as pad 1 when XInput has none. The game and every other program get XInput's answer unchanged, so the game never sees a second controller. Sony pads are mapped by their known layout, other gamepads by the usual HID order; the right stick and triggers are learned from the resting axes. No mod needs a change. `fh3-mods\platform.ini` `[input]`: `Enabled=0` turns it all off, `Raw=0` drops the controller reader, `Ignore=054C:0CE6,...` skips devices. `platform.log` names the controllers it found. **The controller reaches the game too**: Azimuth only hands the game Windows' own Gamepad objects (Xbox-like pads), so a DualSense that isn't presented as an Xbox 360 pad did nothing in the game, not even on the landing page. When XInput has no pad of its own, the platform now registers the controller as a gamepad with the engine (the engine's own GamepadAdded handler, found in azimuth.exe by the code that registers it) and takes it away again when the controller goes or a real XInput pad appears. The game's rumble is shared with mods through `Local\\FH3ModPlatform.Vibration`. `[input] Gamepad=0` turns this off. A DualSense (and Edge) is read straight from its HID device, over USB and over Bluetooth, so it keeps working for the mods after something switches it to its full Bluetooth reports (a Windows list of gamepads shows nothing of it then).

@@ -397,7 +397,9 @@ struct Shared {
     DWORD tick;
     volatile DWORD driving_tick;
     volatile DWORD gyro_on;
-    DWORD reserved[9];
+    volatile DWORD xbox_tick; // an XInput pad was last used (the DualSense mod writes ds_tick after it: the later one is in use)
+    volatile DWORD ds_tick;
+    DWORD reserved[7];
 };
 Shared* g_shared = nullptr;
 
@@ -1302,6 +1304,32 @@ bool setting(const wchar_t* key, bool def) {
 
 } // namespace
 
+// Which device is in use: an XInput pad's real input (a button, a trigger past a quarter, a stick past a third) is timed here, the
+// DualSense mod times the DualSense's; the later of the two is the device in use.
+DWORD WINAPI xbox_activity_thread(LPVOID) {
+    DWORD last_packet[4] = {};
+    bool on[4]           = {};
+    DWORD rescan         = 0;
+    for (;;) {
+        Sleep(30);
+        if (!g_real || !g_shared) continue;
+        const DWORD now = GetTickCount();
+        const bool scan = now - rescan > 1500;
+        if (scan) rescan = now;
+        for (DWORD i = 0; i < 4; ++i) {
+            if (!on[i] && !scan) continue;
+            PadState st{};
+            on[i] = g_real(i, &st) == ERROR_SUCCESS;
+            if (!on[i]) continue;
+            if (st.packet == last_packet[i]) continue;
+            last_packet[i] = st.packet;
+            const bool act = (st.buttons & 0xF3FF) || st.lt > 64 || st.rt > 64 || std::abs(st.lx) > 11000 || std::abs(st.ly) > 11000 ||
+                             std::abs(st.rx) > 11000 || std::abs(st.ry) > 11000;
+            if (act) g_shared->xbox_tick = now ? now : 1;
+        }
+    }
+}
+
 void start_input() {
     if (!setting(L"Enabled", true)) {
         plog("input: turned off (platform.ini [input] Enabled=0)");
@@ -1341,6 +1369,7 @@ void start_input() {
     load_kb_settings();
     if (g_ms_on)
         if (HANDLE t = CreateThread(nullptr, 0, ms_thread, nullptr, 0, nullptr)) CloseHandle(t);
+    if (HANDLE t = CreateThread(nullptr, 0, xbox_activity_thread, nullptr, 0, nullptr)) CloseHandle(t);
     if (setting(L"Gamepad", true)) {
         if (HANDLE t = CreateThread(nullptr, 0, wgi_thread, nullptr, 0, nullptr)) CloseHandle(t);
     } else {
