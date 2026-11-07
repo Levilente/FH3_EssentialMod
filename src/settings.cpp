@@ -858,7 +858,7 @@ struct TuneRow {
     uint8_t* value_desc = nullptr;
     uint8_t* vis_desc   = nullptr;
 };
-constexpr std::size_t kMaxTuneRows = 8;
+constexpr std::size_t kMaxTuneRows = 64;   // the descriptor lookup (name_number) accepts up to 64
 std::deque<TuneRow> g_tune_rows;      // guarded by g_mu; rows are never removed
 
 TuneRow* tune_row(std::size_t i) {
@@ -4332,7 +4332,7 @@ int tuning_row_add(FH3Mod* m, const FH3TuningRow* t) {
     }
     std::scoped_lock lk{g_mu};
     if (g_tune_rows.size() >= kMaxTuneRows) {
-        log_line(m->name, "add_tuning_row: too many tuning rows (8 at most)");
+        log_line(m->name, "add_tuning_row: too many tuning rows (64 at most)");
         return 0;
     }
     for (const TuneRow& r : g_tune_rows)

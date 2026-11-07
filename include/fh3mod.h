@@ -578,7 +578,7 @@ typedef struct FH3ModApi {
 
     /* A slider row of your own on a page of the garage's tuning menu (Springs: after Ride Height), laid out like the
        game's own tuning sliders. The row is written into the page when the tuning menu is built, so add rows from
-       fh3mod_init. See FH3TuningRow. Returns 1 if added, 0 if not (the log says why). Up to 8 rows from every mod. */
+       fh3mod_init. See FH3TuningRow. Returns 1 if added, 0 if not (the log says why). Up to 64 rows in all (the page scrolls). */
     int (*add_tuning_row)(FH3Mod* mod, const struct FH3TuningRow* row);
     /* ==== API version 14: check api_version >= 14 ======================== */
 
