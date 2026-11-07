@@ -310,3 +310,34 @@ the shop's car on every preview, other cars), so a mod must check the model.
   enough Credits. Would you like to purchase using Tokens?"); otherwise it stores `edx` at `this+0x43C` and goes on to the "install?" prompt. The one
   caller, `0x16C699A`, takes the cost from the basket object (`+0x500`). The game sums only its own parts; the platform hooks the function and adds
   the price of the bridge stages waiting in the basket to `edx`.
+
+## Cars: the objects, the build and who drives (found 6-7 Nov, tested in the game)
+
+What the platform and the mods use to find the player's car and to change a car while it is built.
+
+| What | Where | Notes |
+|---|---|---|
+| `Car` (RTTI `ForzaCar`) vtable | `game+0x42E0650` | the first qword of a live Car; a destroyed one has a base class's vtable |
+| `Car::Update` | `game+0x18B8D20` | once a frame per car, on the game's thread (`rcx` = Car, `xmm1` = dt); Airride hooks it |
+| Car's model record | `Car+0x110` | a pointer; `+0x30` of it is the Data_Car id (`2154003`: model 2154, variant 3; old cars like the R34 are `445000` / `445`) |
+| Car's physics spec | `Car+0x140` | filled by the central car loader; track outer front `+0xF4`, rear `+0xF8` (metres); suspension front `+0x378`, rear `+0x420`; tuning values from `+0x6E80` |
+| Car dynamics interface | `Car+0x71E8` | `CCarDynamics + 0x4B0`; vtable slot 80 (`+0x280`) re-applies a changed spec to the physics |
+| In-Car build | `game+0x189BCC0` | `rcx` = the new Car; calls `0x189BA70` with `rdx = Car+0x140`, which calls the loader. Every car the game builds goes through it: the player's, traffic, AI opponents. The platform hooks it (shared) to tell whose car is built |
+| Central car loader | `game+0x19E6A80` | `rcx` = spec, `r8` = &Data_Car id (saved at `[rsp+0x68]`); also called with a spec on the stack (`game+0x36EC7A`, the main thread's car stats) |
+| Track widths stored | `game+0x19E9027` | the instruction after both track stores (`lea rcx, [rbp+0x640]`), `r14` = spec; Universal Wheel Spacers' hook |
+| HUD speedometer controller | `game+0xB26690` | `rcx` = controller; `+0x120` the player's Car, `+0x128` its control block (non-null while the weak pointer is alive) |
+
+**A change to the spec after the car is built does nothing.** Tested: 15 cm more track written into the live Car's spec (`Car+0x140`) twelve
+seconds after the car was on the road; the wheels didn't move. The car takes its values when it is built, so a mod that changes the car has to
+do it in the build, and decide there whose car it is.
+
+**Whose car is built.** Nothing in the build says it: the player's car and an AI car of the same model go through the same code, from the same
+thread and caller (`0x189A21D`), with requests that look alike. What tells them apart is time: the player's car is built when the player gets into
+it (session start, garage, an event's car select), and stays the same object through events (a one-make race builds only the ten opponents). The
+platform keeps the player's Car (the one it accepted last, or the one the HUD shows) and takes a new car of the same model and garage id, built
+while that Car is still alive, for someone else's. The upgrade shop's car is always the player's. See `upgrades.cpp`, `build_is_players`.
+
+**Which garage car.** The save's `Profile0_Career_Garage` has `Id` (garage id) and `CarId` (Data_Car id) of every car the player owns; the game
+reads `SELECT 1 FROM Profile0_Career_Garage WHERE Id=n AND IsCarInstalled(Car)` (or `SELECT * ... WHERE Id=n`) when it puts the player into car
+n. Browsing the garage reads every car with `SELECT 1 ... WHERE Id=n`, which says nothing; `UPDATE Profile0_Career_Garage SET TopSpeed=...` saves the
+stats of the driven car, but of other cars too, and seconds late.
