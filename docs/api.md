@@ -1,12 +1,36 @@
 # API reference
 
-> Version numbers such as *platform 2.8.0* in this file are those of the FH2 platform this one was forked from. The FH3 Mod Platform starts at 1.0.0 (API version 15).
+Everything is in [`include/fh3mod.h`](../include/fh3mod.h). This page goes through it member by member. The FH3 Mod Platform 1.0.0 has **API version 15**.
 
-Everything is in [`include/fh3mod.h`](../include/fh3mod.h). This page goes through it member by member.
+The platform is a fork of the FH2 Mod Platform, and the API keeps its numbering, so a mod checks `api->api_version` the same way on both. A few parts were written for FH2's menus and files and do nothing in FH3 yet; the table says which.
 
-**API versions.** The numbering continues the FH2 platform's, so a mod written for it keeps its version checks: version 2 added file overrides, database patches and interfaces between mods, 3 hooks, 4 the Mods page, 5 its sliders, 6 mod descriptions and link rows, 7 byte patches and instruction hooks, 8 pages of your own, 9 title-screen entries, choice rows, online play (FH2MP), sessions, snapshots, hotkeys and commands, 10 `add_string_key` (strings for FH3's hashed string tables) 11 custom garage upgrades (`register_upgrade`), 12 `upgrade_car_model`, 13 tuning rows (`add_tuning_row`), 14 the platform following the player's car (`upgrade_garage_for_car`, `upgrade_stage_for_car`) and 15 `upgrade_preview_stage` and `upgrade_shop_serial`. The FH3 Mod Platform 1.0.0 has API version 15. Check `api->api_version` (or `api->size`) before using anything added after version 1. Where a section below says "platform 2.x", that is the FH2 platform release the feature first appeared in; the version to check is the API version.
+## Everything you can use
 
-**What is not in FH3 yet.** `add_page` (pages of your own, API 8) and `add_title_entry` (title-screen entries, API 9) return 0 and say why in the log: they need game addresses that were only found for FH2. Everything else in this file works in the FH3 platform; the Mods page, its rows, update checks, file overrides, database patches and the upgrade bridge are the parts the FH3 port added or reworked.
+| What | Calls | API | In FH3 |
+|---|---|---|---|
+| Register, log, version, folders | `register_mod`, `log`, `mod_version`, `azimuth_dir`, `game_dir` | 1 | yes |
+| Find the game, wait for its code | `game_base`, `wait_for_game`, `wait_for_code` | 1, 3 | yes |
+| Hooks on functions, calls, pointers | `hook_function`, `hook_call`, `hook_pointer`, `enable_hooks`, `disable_hooks` | 3 | yes |
+| Byte patches, hooks on one instruction | `patch_bytes`, `hook_instruction` | 7 | yes |
+| Replace a game file (`media`) | `set_file`, `clear_file` | 2 | yes |
+| Change the game database (SQL) | `add_sql`, `clear_sql`, `apply_database` | 2 | yes |
+| New texts in FH3's string tables | `add_string_key` | 10 | yes |
+| Change existing texts | `set_string`, `replace_string`, `clear_strings`, `apply_strings` | 1 | no: FH3's tables use 32-bit hashed keys, these work on FH2's |
+| Title-screen notices | `set_notice` | 1 | no (stored, not shown); update checks show on MODS > Updates |
+| Settings rows on the MODS page (On/Off, sliders, links, choices) | `add_setting`, `get_setting`, `set_setting`, `get_slider`, `set_slider` | 4, 5, 6, 9 | yes |
+| Hotkeys (keyboard and controller) | `add_hotkey` | 9 | yes |
+| Commands from outside the game (`fh3mod.exe`) | `add_command` | 9 | yes |
+| Interfaces between mods | `publish_interface`, `get_interface`, `wait_for_mods` | 2 | yes |
+| Sessions, own log files, save snapshots, crash dump memory | `session_id`, `session_log_path`, `request_save_snapshot`, `add_dump_memory` | 9 | yes |
+| Garage upgrades (shop, basket, purchase, per-car stages) | `register_upgrade`, `upgrade_stage`, `upgrade_active_garage`, `upgrade_import` | 11 | yes |
+| Whose car is it (the player's, a loaner, an AI car) | `upgrade_car_model`, `upgrade_garage_for_car`, `upgrade_stage_for_car` | 12, 14 | yes |
+| Shop preview for effects outside the car's data | `upgrade_preview_stage`, `upgrade_shop_serial` | 15 | yes |
+| Slider rows on the car's Tuning > Springs page | `add_tuning_row` | 13 | yes |
+| Pages of your own, tiles | `add_page`, `set_page_rows`, `set_page_xaml`, `set_page_tile_text`, ... | 8 | no: return 0 (FH2 menus only) |
+| Title-screen entries | `add_title_entry`, `title_started_by` | 9 | no: return 0 (FH2 menus only) |
+| Online play | `playing_online`, `offline_only` | 9 | no online play for FH3: `playing_online` is always 0 |
+
+Where to start: [writing-a-mod.md](writing-a-mod.md) (an empty folder to a release), [car-mods.md](car-mods.md) (mods that change the player's car), [fh3-game-notes.md](fh3-game-notes.md) (what is known about the game's code: addresses, objects, menus).
 
 ## Rules that apply everywhere
 
@@ -23,7 +47,7 @@ FH3MOD_EXPORT int fh3mod_init(const FH3ModApi* api);
 
 Export this from your DLL. The platform loads every DLL in `fh3-mods` in alphabetical order, then calls each one's `fh3mod_init` in the same order, on its own thread and outside the loader lock. Return 0 on success. Any other value, or a crash inside the call, is logged; the crash is caught, so it won't take the game down. Once every mod's `fh3mod_init` has returned, the platform writes all string-table edits and notices.
 
-DLLs without `fh3mod_init` still load, and are logged as mods from before the platform. From platform 2.8.0 they load once the game Azimuth starts is known to be FH2, and not at all for another game ([game_base](#game_base-and-wait_for_game)), since they change the game by themselves.
+DLLs without `fh3mod_init` still load, and are logged as mods from before the platform. They load once the game Azimuth starts is known to be FH3, and not at all for another game ([game_base](#game_base-and-wait_for_game)), since they change the game by themselves.
 
 ## FH3ModApi fields
 
@@ -31,7 +55,7 @@ DLLs without `fh3mod_init` still load, and are logged as mods from before the pl
 |---|---|
 | `size` | `sizeof(FH3ModApi)` as the platform knows it. |
 | `api_version` | The platform's `FH3MOD_API_VERSION`. |
-| `platform_version` | The platform's version, like `"2.2.0"`. |
+| `platform_version` | The platform's version, like `"1.0.0"`. |
 | `azimuth_dir` | The folder with `azimuth.exe`, without a trailing slash. Put your data folder here. |
 | `game_dir` | The game's `Mount` folder (`game:\`), or `""` if it wasn't found. |
 
@@ -48,7 +72,7 @@ Call once, from `fh3mod_init`. It returns your handle, or null if `info` is miss
 | `size` | `sizeof(FH3ModInfo)` |
 | `name` | Display name, used in the log and in notices. |
 | `version` | Your version, `x.y.z`. |
-| `github_repo` | `"Owner/Repo"`, or null. When set (and `check_updates` is 1), the platform checks your latest release on GitHub, at most every six hours, and shows "Name x.y.z is available" on the title screen when it's newer than `version`. The six hours start over when a different `version` is installed, and a remembered release older than `version` is never trusted, so installing an older or newer build checks again straight away. |
+| `github_repo` | `"Owner/Repo"`, or null. When set (and `check_updates` is 1), the platform checks your latest release on GitHub, at most every six hours, and shows it on **MODS > Updates** when it's newer than `version`. The six hours start over when a different `version` is installed, and a remembered release older than `version` is never trusted, so installing an older or newer build checks again straight away. |
 | `platform_version` | The platform version you ship with. Pass `FH3MOD_PLATFORM_VERSION`. If the installed platform is older, players get "Old FH3 Mod Platform: reinstall Name". |
 | `check_updates` | 0 to never go online for your mod. Give players a setting for it. |
 | `description` | API 6: a sentence or two for the MODS tab's Installed mods page, or null. |
@@ -62,9 +86,13 @@ The update check runs in the background. If GitHub can't be reached, the last an
 void log(FH3Mod* mod, const char* utf8_line);
 ```
 
-Writes one line to `fh3-mods\platform.log`, with a timestamp and `[YourMod]` in front. The log starts fresh at every launch. Use it for the things a player or you would want to see when something goes wrong. A mod with a lot to say should keep its own log as well.
+Writes one line to `fh3-mods\platform.log`, with a timestamp and `[YourMod]` in front. The log starts fresh at every launch (a copy of each session's is kept in `fh3-mods\platform-logs`). Keep it short by default: log start-up problems always, and the details only when the player turns a `Log`/`DebugLog` switch of yours on, as the platform does with `platform.ini` `[log] Verbose`. A mod with a lot to say should keep its own log as well ([Sessions](#sessions-api-9)).
 
-## set_string
+## set_string, replace_string, clear_strings, apply_strings (FH2 tables)
+
+> **Not for FH3.** These edit FH2's string tables (the "LSB2" format with 16-bit keys). FH3's tables (`media\Stripped\StringTables\<language>.zip`) use 32-bit hashed keys, so in FH3 these calls change nothing. To give your mod texts in FH3, add new keys with [`add_string_key`](#string-table-keys-api-10) and refer to them (the upgrade bridge does this for its names and descriptions). Replacing an existing FH3 text isn't supported yet.
+
+### set_string
 
 ```c
 void set_string(FH3Mod* mod, const char* table, uint16_t key, const wchar_t* text);
@@ -72,7 +100,7 @@ void set_string(FH3Mod* mod, const char* table, uint16_t key, const wchar_t* tex
 
 Sets the string with `key` in `table` (for example `"Main.str"`) to `text`, in every language. To find keys, see [`string-tables.md`](string-tables.md). If two mods set the same key, the one loaded later wins, and the log says so.
 
-## replace_string
+### replace_string
 
 ```c
 void replace_string(FH3Mod* mod, const char* table, const wchar_t* from, const wchar_t* to);
@@ -80,7 +108,7 @@ void replace_string(FH3Mod* mod, const char* table, const wchar_t* from, const w
 
 Replaces every string in `table` that is exactly `from` (the whole string, case-sensitive) with `to`. This runs after key edits, so it sees their results. It's handy for text that's the same in every language, like the names in `AIPlayers.str`.
 
-## clear_strings
+### clear_strings
 
 ```c
 void clear_strings(FH3Mod* mod, const char* table);
@@ -88,7 +116,7 @@ void clear_strings(FH3Mod* mod, const char* table);
 
 Drops your edits to `table`, or to every table if `table` is null. When no mod edits a table any more, its override files are removed, so the game uses its own text again. That happens straight away when you call `clear_strings` and then `apply_strings`. For a table left over from an earlier launch, such as one from a mod that has since been removed, it happens about 15 seconds after startup, which leaves mods time to make their edits from their own threads first.
 
-## apply_strings
+### apply_strings
 
 ```c
 void apply_strings(FH3Mod* mod);
@@ -96,7 +124,7 @@ void apply_strings(FH3Mod* mod);
 
 Writes every table that changed since the last write. It's done for you once all mods have returned from `fh3mod_init`, so call it yourself only for edits you make later. The game reads its string tables once, at startup, so a later edit shows from the next launch.
 
-Edits are written to Extra Options' `mediaoverride` folder, as `mediaoverride\Stripped\StringTables\<language>\<table>`. Extra Options makes the game read that folder. When Extra Options isn't loaded, platform 2.7.3 and newer does it instead ([game-notes.md](game-notes.md#the-override-folder)). With Extra Options loaded and `EnableMediaOverrides=0`, the files are still written but the game won't read them. The tables the platform wrote are listed in `fh3-mods\platform-tables.txt`, so that ones no longer needed get cleaned up.
+Edits are written to the `mediaoverride` folder, as `mediaoverride\Stripped\StringTables\<language>\<table>`. Extra Options makes the game read that folder; when it isn't loaded, the platform does it ([fh3-game-notes.md](fh3-game-notes.md#override-folder-mount-mechanism-read-from-code-and-the-vtable-slots-checked-against-the-exe-on-disk)). With Extra Options loaded and `EnableMediaOverrides=0`, the files are still written but the game won't read them. The tables the platform wrote are listed in `fh3-mods\platform-tables.txt`, so that ones no longer needed get cleaned up.
 
 ## set_notice
 
@@ -104,9 +132,7 @@ Edits are written to Extra Options' `mediaoverride` folder, as `mediaoverride\St
 void set_notice(FH3Mod* mod, const char* utf8_lines);
 ```
 
-Sets your lines on the title screen, under "PRESS (A) TO START". Separate lines with `\n`; empty lines are dropped, and null or `""` clears them. Each line fits about 40 characters. Your lines appear together with every other mod's, sorted by mod name, with the platform's own update and version lines for your mod after yours.
-
-They're saved to `fh3-mods\notices\<name>.txt` and written into `Main.str` the next time strings are applied, which happens on its own after `fh3mod_init`. Mods from before the platform (WheresMyBuddy 1.1 and 1.2, FH2 Universal Radio 1.2) read and write the same files, so their notices and yours always end up together.
+On FH2 this puts lines on the title screen. **In FH3 the lines are kept** (`fh3-mods\notices\<name>.txt`) **but not shown**: the title screen text is in a hashed table. Update checks don't need it: a newer release of your mod shows on **MODS > Updates**. Tell the player about problems with your log, or a settings row's description.
 
 ## game_base and wait_for_game
 
@@ -115,11 +141,11 @@ void* game_base(void);
 void* wait_for_game(uint32_t timeout_ms);
 ```
 
-`game_base` returns the base address of `forza_durango_release_final.exe` once Azimuth has mapped it into the process, or null before that. Azimuth maps it when the player presses Play. `wait_for_game` waits until it's mapped, or until `timeout_ms` runs out (`0xFFFFFFFF` waits forever), and returns the base or null. It checks every 100 ms. Call it from your own thread, never from `fh3mod_init`, which would hold up every mod loaded after you.
+`game_base` returns the base address of `forza_durango_release_final.exe` once Azimuth has mapped it into the process, or null before that. Azimuth maps it when the game starts. `wait_for_game` waits until it's mapped, or until `timeout_ms` runs out (`0xFFFFFFFF` waits forever), and returns the base or null. It checks every 100 ms. Call it from your own thread, never from `fh3mod_init`, which would hold up every mod loaded after you.
 
-The game is recognised by its PE header: the 24 November 2015 build, timestamp `0x565501ED` and image size `0x03A18000`. Azimuth maps it at its preferred base, `0x140000000`, but use the returned address anyway.
+The game is recognised by its PE header: the Xbox One release of 5 June 2018 (1.0.125.0), timestamp `0x5B16ECCA` and image size `0x05495000`. Azimuth maps it at its preferred base, `0x140000000`, but use the returned address anyway. Every `game+0x...` address in these docs and in the mods is relative to that base.
 
-**Other games.** Azimuth 1.0.1 runs other Forza games from the same launcher (Forza Motorsport 5 and 6, for instance), and the platform and your mod load before the player picks one. Their exes have the same name, `forza_durango_release_final.exe`, and are mapped at the same address. From platform 2.8.0, once Azimuth has mapped one of those, or an FH2 exe of another build, `game_base` returns null for the rest of the session, and `wait_for_game` and `wait_for_code` return null straight away instead of at their timeout. So treat null as "there's no FH2 to change" and stop there, as for a timeout. Anything you did in `fh3mod_init` (text, files, the database) only ever goes to FH2's own folder, so it can stay. The log says which game was started: `game: Azimuth started Forza Motorsport 5 (title 7b35d917), not Forza Horizon 2. ...`, with the name from `data\azimuth.ini`. When Azimuth's command line already says it's another game (`--skip-launcher` with another title in `[launcher] game=`, or `--game=DIR`), no mods are loaded at all. Older platforms keep waiting, and a mod that finds the game by itself has to check the exe's timestamp and size, as above.
+**Other games.** Azimuth runs other Forza games from the same launcher, and the platform and your mod load before the game is known. Their exes have the same name and are mapped at the same address. Once Azimuth has mapped another game, or FH3 of another build, `game_base` returns null for the rest of the session, and `wait_for_game` and `wait_for_code` return null straight away. So treat null as "there's no FH3 to change" and stop there, as for a timeout. The log says which game was started.
 
 ## set_file and clear_file (API 2)
 
@@ -128,7 +154,7 @@ int set_file(FH3Mod* mod, const char* media_path, const void* data, size_t size)
 void clear_file(FH3Mod* mod, const char* media_path);
 ```
 
-`set_file` replaces a file the game reads from `game:\media`. Give the path relative to `media`, with forward or back slashes. For a file inside a zip, use the zip's name without `.zip` as a folder: `media\UI.zip\x.xml` is `"UI/x.xml"`. The file is written straight away to the `mediaoverride` folder, which Extra Options mounts over `media`, or the platform from 2.7.3 when Extra Options isn't loaded. If the file there already has the same content, it isn't rewritten.
+`set_file` replaces a file the game reads from `game:\media`. Give the path relative to `media`, with forward or back slashes. For a file inside a zip, use the zip's name without `.zip` as a folder: `media\UI.zip\x.xml` is `"UI/x.xml"`. The file is written straight away to the `mediaoverride` folder, which Extra Options mounts over `media`, or the platform when Extra Options isn't loaded. Textures are `.swatchbin` files; the upgrade icons of the mods are made with `scripts/gen_icons.py` in their repos. If the file there already has the same content, it isn't rewritten.
 
 Only one mod can replace a file. `set_file` returns 1 when the file is yours and written. It returns 0 if another mod already replaces it, if the path isn't a plain path under `media`, or if the write failed, and the log says which. String tables and the game database can't be replaced whole; use the functions for those. If someone had put a file at that spot by hand, it's kept next to it as `<name>.bak` the first time.
 
@@ -148,28 +174,15 @@ void apply_database(FH3Mod* mod);
 
 The platform copies the database the game would read and runs every mod's statements, in load order, each mod inside its own transaction. If any statement from a mod fails, all of that mod's changes are rolled back and the SQLite error is logged, while the other mods' changes still apply. The result goes to `mediaoverride\Stripped\gamedbRC.slt`, which the game reads first.
 
-Other mods put a database of their own there too, such as traffic car mods, and FH2MP puts the server's there for online play. From platform 2.7.2 the platform's copy is built on what's there:
+Another mod's own `gamedbRC.slt` in `mediaoverride\Stripped` (a car pack, say) is built on, and a copy of it is kept as `fh3-mods\platform-db-base.slt`; otherwise a car pack's in `mediapc\Stripped`, and without one the game's original. When no mod has statements any more, the platform's copy is deleted and the other mod's database is put back, byte for byte.
 
-- **Another mod's database in `mediaoverride\Stripped`** is built on. A copy of it is kept as `fh3-mods\platform-db-base.slt`.
-- **Otherwise a car pack's in `mediapc\Stripped`** is built on, and without one, the original in `media\Stripped`.
-- **FH2MP's online copy** is built over. FH2MP puts it back when you play online. The platform knows it by its bytes, or by the size and date the server's database had at earlier launches. A date up to 2 s off still counts when it's a whole hundredth of a second, as every date is on a game drive with FAT32 (which keeps dates to 2 s) or exFAT. Any other date has to be the same, so another mod's database that's the same size and dated a moment from the server's isn't taken for FH2MP's copy.
-- **When no mod has statements any more**, or none of them could be applied, the platform's copy is deleted and the other mod's database is put back, byte for byte and with its own date. It's also put back when the platform's copy was deleted along with the last mod that changes the database, even after FH2MP put the server's database in its place online. While FH2MP is installed, the platform keeps a copy of another mod's database even when no mod has statements, and puts it back after you've played online.
-- **A plain copy of the game's database, or a car pack's,** put in `mediaoverride\Stripped` means the other mod was uninstalled that way. Its kept copy isn't built on or put back any more, and goes to `fh3-mods\platform-db-base.previous.slt`.
-- **A file the platform replaces that it can't make again**, such as a copy another install of the platform built, is kept as `fh3-mods\platform-db-base.previous.slt`. Only the last one is kept, and the log says each time.
+Every copy the platform builds has the platform's mark in its header (`application_id` 0x46483244; the game doesn't read it), and `fh3-mods\platform-db.txt` has its size and date. So don't delete `mediaoverride\Stripped\gamedbRC.slt` in your uninstall steps (the platform cleans up its own), and don't ship the platform's copy in your mod. Building the copy takes a moment, so it's only redone when something changed: `platform-db.txt` remembers a hash of the base and every mod's statements.
 
-Up to 2.7.1 the platform always built from `media`'s database, so another mod's database in `mediaoverride` was lost. A copy an older platform left there is built again, or deleted once no mod changes the database. That includes a plain copy of the game's, which 2.7.1 left when no statement changed a row.
-
-Every copy the platform builds has the platform's mark in its header (`application_id` 0x46483244, "FH3D"; the game doesn't read it), and `fh3-mods\platform-db.txt` has its size and date. That's how the platform tells its own copy from other mods' databases. So:
-
-- **Don't delete `mediaoverride\Stripped\gamedbRC.slt` in your mod's uninstall steps.** The platform deletes its own copy and puts back what was there. If another mod still changes the database, deleting it means the copy is built again without the other mod's database, which is then only kept in `platform-db-base.previous.slt`.
-- **Don't ship the platform's copy in your mod.** Because of the mark, it's never built on: the platform builds over it from the game's own database. If your mod ships a database of its own, start from the game's original, or set `PRAGMA application_id = 0` on it.
-- **Two Azimuth folders sharing one game folder** don't know each other's copy. Keep the mods that change the database in one of them. FH2MP can be in the other: from platform 2.7.2, each folder lists the size and date of its FH2MP's copies in `mediaoverride\Stripped\platform-db-fh2mp.txt`, so the other folder doesn't take the server's database for another mod's.
-
-Building the copy takes a moment, so it's only redone when something changed. `fh3-mods\platform-db.txt` remembers a hash of the database it's built on and every mod's statements, and the log repeats the results from the last build.
+Useful tables: `Data_Car` (cars, `Id` is the Data_Car id the car code uses, `BaseCost`), `Data_CarBody` (track widths, ride heights), `List_Upgrade*` (parts and prices), `UpgradeTypes` / `Upgrades` / `UpgradeAreas` (the shop's lists), and the save's `Profile0_*` tables, which live in the profile database, not here.
 
 Statements added in `fh3mod_init` are applied for you. For later ones, call `apply_database` from your own thread. Like string tables, the database is read once at startup, so later changes show from the next launch.
 
-The platform has SQLite built in (3.53.4 from platform 2.7.1; before that it used Windows' own `winsqlite3.dll`, which Wine and Proton don't have). If your mod reads a SQLite file itself, build SQLite in too rather than loading `winsqlite3.dll`, or it won't work for Linux players ([linux.md](linux.md)). To look around the database, open a copy of it in any SQLite browser.
+The platform has SQLite built in. If your mod reads a SQLite file itself, build SQLite in too rather than loading `winsqlite3.dll`, or it won't work for Linux players ([linux.md](linux.md)). To look around the database, open a copy of it in any SQLite browser.
 
 ## Interfaces between mods (API 2)
 
@@ -186,7 +199,7 @@ A mod can offer other mods a struct of function pointers. Publish it under a nam
 
 `mod_version` gives the version a mod registered with, matched by name without regard to case, or null if it isn't installed. Use it to check for a mod you depend on and to tell the player, perhaps with `set_notice`, when it's missing or too old.
 
-WheresMyBuddy publishes `WheresMyBuddy.Friends`, with the names on the Drivatars and the signed-in gamertag (see `include/wheresmybuddy.h` in its repo). FH2 Universal Radio publishes `FH3UniversalRadio.NowPlaying`, with the song that's playing (`include/fh2universalradio.h`).
+No FH3 mod publishes an interface yet. For the player's car, use the upgrade bridge's calls rather than another mod's interface: every mod then gets the same answer.
 
 ## Hooks (API 3)
 
@@ -219,29 +232,32 @@ Each call returns a hook that is switched off, or null with the reason in the lo
 
 **wait_for_code.** Hooks in game code can't be made until `wait_for_code` has returned. It waits like `wait_for_game` and then, if Extra Options is installed, also until Extra Options has finished patching. Extra Options checks every place it patches before it changes any of them, and if a single one isn't as it expects, it patches nothing at all, so a mod hooking early could quietly switch Extra Options off. The platform knows Extra Options is done when its log (`FH3_ExtraOptions.log`, written this launch) says so. That's the status line it writes once it's done (`OK:`, `REFUSED:` or `DISABLED:`), or its `AZIMUTH: winmm proxy initialized` line. If it hasn't said so 20 seconds after the game was mapped, the platform goes ahead anyway and logs that. Hooks outside the game (in Azimuth or a Windows DLL) don't have to wait.
 
-**Other games.** When Azimuth 1.0.1 has started another game (see [game_base](#game_base-and-wait_for_game)), `wait_for_code` returns null, and from platform 2.8.0 every hook or patch into that game's exe is refused, whatever address you pass: `can't hook function 0x140001000 (...): it's in Forza Motorsport 5 (title 7b35d917), which the platform leaves alone`.
+**Other games.** When Azimuth has started another game (see [game_base](#game_base-and-wait_for_game)), `wait_for_code` returns null, and every hook or patch into that game's exe is refused, whatever address you pass.
 
 ```cpp
-using SerializeFn = char (*)(void* self, void* archive);
-static SerializeFn g_serialize;
+// Car::Update (game+0x18B8D20) runs once a frame for every car, on the game's thread (Airride hooks it).
+using CarUpdateFn = uint64_t (*)(void* car, float dt);
+static CarUpdateFn g_car_update;
 
-static char my_serialize(void* self, void* archive) {
-    const char r = g_serialize(self, archive);
-    // ... look at the loaded object ...
+static uint64_t my_car_update(void* car, float dt) {
+    const uint64_t r = g_car_update(car, dt);
+    // ... look at the car (Car+0x140: its physics spec, Car+0x110: the record whose +0x30 is the Data_Car id) ...
     return r;
 }
 
 static DWORD WINAPI start(LPVOID) {
     char* base = static_cast<char*>(g_api->wait_for_code(0xFFFFFFFFu));
-    void** slot = reinterpret_cast<void**>(base + 0x2D44F20) + 2; // ChampionshipDrivatarsState vtable, slot 2
-    if (g_api->hook_pointer(g_mod, "ChampionshipDrivatarsState::Serialize", slot,
-                            reinterpret_cast<void*>(&my_serialize), reinterpret_cast<void**>(&g_serialize)))
-        g_api->enable_hooks(g_mod, nullptr);
+    if (!base) return 0;   // not FH3, or not this build
+    if (FH3Hook* h = g_api->hook_function(g_mod, "Car::Update", base + 0x18B8D20,
+                                          reinterpret_cast<void*>(&my_car_update), reinterpret_cast<void**>(&g_car_update)))
+        g_api->enable_hooks(g_mod, h);
     return 0;
 }
 ```
 
-Every hook is logged when it's made and switched (`[MyMod] hooked function game+0x1997740 (FMOD::System::createSound)`), and crash reports list them all, marking the ones that were on. A crash inside a MinHook trampoline (the copy of the game's first instructions) is reported as such, with the hook it belongs to.
+Start such a thread from `fh3mod_init` (`CreateThread`), never wait in `fh3mod_init` itself.
+
+With `platform.ini` `[log] Verbose=1` every hook is logged when it's made and switched (`[MyMod] hooked function game+0x18B8D20 (Car::Update)`); problems are always logged, and crash reports list every hook, marking the ones that were on. A crash inside a MinHook trampoline (the copy of the game's first instructions) is reported as such, with the hook it belongs to.
 
 ## Byte patches and instruction hooks (API 7)
 
@@ -259,16 +275,16 @@ typedef struct FH3Context {
 typedef void (*FH3InstructionFn)(FH3Context* ctx, void* user);
 ```
 
-For when a hook on a whole function, one call or one pointer is too blunt: a constant in the middle of a long function, a branch to flip, the value a register holds at one exact instruction. Both come back as an `FH3Hook`, switched off, and are switched with `enable_hooks` and `disable_hooks` like the hooks above. The same rules hold: hooks in game code wait for `wait_for_code`, the bytes are checked against `forza_durango_release_final.exe` and against every other hook, and everything is logged and listed in crash reports. They need platform 2.6.0, so check `api_version >= 7`.
+For when a hook on a whole function, one call or one pointer is too blunt: a constant in the middle of a long function, a branch to flip, the value a register holds at one exact instruction. Both come back as an `FH3Hook`, switched off, and are switched with `enable_hooks` and `disable_hooks` like the hooks above. The same rules hold: hooks in game code wait for `wait_for_code`, the bytes are checked against `forza_durango_release_final.exe` and against every other hook, and everything is logged and listed in crash reports. Check `api_version >= 7`.
 
 Addresses here are exact instructions, so they belong to the game build you found them in (the one Azimuth runs). If the bytes aren't what you expect, `expect` and the check against the exe on disk refuse the change rather than writing over something else.
 
 **patch_bytes** writes `size` bytes (1 to 32) of `bytes` at `at`. Pass the bytes you expect to find there in `expect` (the same size), or null to take whatever is there as long as it matches the exe on disk. Switching the patch off puts the original bytes back. Only one patch can cover a byte, and a patch can't overlap any hook. The bytes are written with the game's other threads paused, none of them half way through them.
 
 ```cpp
-// mov r8d, 1 -> mov r8d, 0: the pause menu stops hiding its Marketplace tab
-static const unsigned char hide[] = {0x41, 0xB8, 1, 0, 0, 0}, show[] = {0x41, 0xB8, 0, 0, 0, 0};
-if (FH3Hook* p = api->patch_bytes(mod, "Marketplace tab: show", base + 0xDDACAD, hide, show, sizeof show))
+// (made-up address and bytes, to show the call) a conditional jump made unconditional
+static const unsigned char was[] = {0x74, 0x12}, now[] = {0xEB, 0x12};   // je +0x12 -> jmp +0x12
+if (FH3Hook* p = api->patch_bytes(mod, "always take the branch", base + 0x1234567, was, now, sizeof now))
     api->enable_hooks(mod, p);
 ```
 
@@ -283,15 +299,17 @@ When it refuses, the log says which of these it was. Inside, the replaced instru
 Several mods can hook the same instruction; all of their `fn`s run, the most recently enabled first, each seeing the changes of the ones before it. `fn` runs on the game's thread, often every frame, so keep it short. If it crashes, the crash is caught, logged under your mod's name, and that hook is skipped from then on; the game keeps running. Instruction hooks work in the game and in any loaded DLL with unwind information, like your own.
 
 ```cpp
-// The freeroam HUD being shown (the Hud page's vtable +0x488, game+0xD38DD0): after
-// "mov rbx, rcx", rbx is the page.
-static void hud_shown(FH3Context* ctx, void*) {
-    void* page = reinterpret_cast<void*>(ctx->rbx);
-    // ... remember it ...
+// Universal Wheel Spacers: the central car loader (game+0x19E6A80) has just stored the car's track widths into the
+// spec it fills (r14 + 0xF4 front, + 0xF8 rear, metres); [rsp+0x68] holds the Data_Car id it was given.
+static void track_stored(FH3Context* ctx, void*) {
+    char* spec        = reinterpret_cast<char*>(ctx->r14);
+    const int car_id  = *reinterpret_cast<const int*>(ctx->rsp + 0x68);
+    const int stage   = g_api->upgrade_stage_for_car(g_mod, g_front, car_id);   // 0: not the player's car
+    if (stage > 0) *reinterpret_cast<float*>(spec + 0xF4) += 2.0f * stage * 0.01f;
 }
 
 if (api->api_version >= 7)
-    if (FH3Hook* h = api->hook_instruction(mod, "Hud shown", base + 0xD38DF2, &hud_shown, nullptr))
+    if (FH3Hook* h = api->hook_instruction(mod, "Car spec loaded (track outer)", base + 0x19E9027, &track_stored, nullptr))
         api->enable_hooks(mod, h);
 ```
 
@@ -331,7 +349,7 @@ typedef struct FH3Setting {
 } FH3Setting;
 ```
 
-These put On/Off switches and sliders for your mod in the game's own menus. When at least one mod adds a row, Pause > Settings gets a sixth tile, MODS, and the page behind it lists every mod's rows in load order. It's laid out like the HUD options page: the row's description, followed by your mod's name, shows beside the list.
+These put On/Off switches, sliders, links and choices for your mod in the game's own menus: **Home > MODS > Installed mods**, A on your mod opens its settings ("SETTINGS / YOUR MOD"), and **All settings** lists every mod's rows. It's laid out like the game's HUD options page: the row's description, followed by your mod's name, shows beside the list. The player can also switch a whole mod off on Installed mods (it then isn't loaded from the next start).
 
 Add your rows from `fh3mod_init`. The platform writes the page once every mod's `fh3mod_init` has returned, so a row added after that only shows from the next launch (the log says so). `key` is letters, digits and `_`, and unique within your mod. `add_setting` returns 1, or 0 with the reason in the log.
 
@@ -354,7 +372,7 @@ if (api->api_version >= 4) {
 }
 ```
 
-**Sliders (API 5, platform 2.4.0).** Set `kind = FH3_SETTING_SLIDER` and the row is the game's own slider, like the audio volumes: left and right move it by `step` between `min` and `max`, and the number at its end is the value times `display_scale`, with `decimals` digits after the point. A value kept as a share, like 0.12, reads best with `display_scale = 100` and no decimals ("12"). Pass the current value in `slider_value`; `on_slide` gets each new one, already kept inside the range and on a step. `get_slider` and `set_slider` work like `get_setting` and `set_setting`. `needs_restart` works for sliders too. An older platform would show a slider as an On/Off row, so only add one when `api_version >= 5`:
+**Sliders (API 5).** Set `kind = FH3_SETTING_SLIDER` and the row is the game's own slider, like the audio volumes: left and right move it by `step` between `min` and `max`, and the number at its end is the value times `display_scale`, with `decimals` digits after the point. A value kept as a share, like 0.12, reads best with `display_scale = 100` and no decimals ("12"). Pass the current value in `slider_value`; `on_slide` gets each new one, already kept inside the range and on a step. `get_slider` and `set_slider` work like `get_setting` and `set_setting`. `needs_restart` works for sliders too. An older platform would show a slider as an On/Off row, so only add one when `api_version >= 5`:
 
 ```cpp
 static void slid(void*, const char* key, float value) {
@@ -373,7 +391,7 @@ if (api->api_version >= 5) {
 }
 ```
 
-**Choices (API 9, platform 2.8.0).** Set `kind = FH3_SETTING_CHOICE` and give `choices` and `choice_count`, and the row shows one of them by name, between the same left and right arrows as the game's own option rows ("Speedometer: Analogue / Digital"). Left and right step through them, stopping at the ends. `value` is the index of the one chosen, from 0, and `on_change`, `get_setting` and `set_setting` use that index (`set_setting` keeps it in range). The names are copied when you add the row; there can be 2 to 32 of them, and a dozen or so characters of each fit. `needs_restart` works as for a switch. Use it wherever a number would otherwise stand for something with a name, like a button or a mode. An older platform would show it as an On/Off row, so only add one when `api_version >= 9`:
+**Choices (API 9).** Set `kind = FH3_SETTING_CHOICE` and give `choices` and `choice_count`, and the row shows one of them by name, between the same left and right arrows as the game's own option rows ("Speedometer: Analogue / Digital"). Left and right step through them, stopping at the ends. `value` is the index of the one chosen, from 0, and `on_change`, `get_setting` and `set_setting` use that index (`set_setting` keeps it in range). The names are copied when you add the row; there can be 2 to 32 of them, and a dozen or so characters of each fit. `needs_restart` works as for a switch. Use it wherever a number would otherwise stand for something with a name, like a button or a mode. An older platform would show it as an On/Off row, so only add one when `api_version >= 9`:
 
 ```cpp
 static const char* const kButtons[] = {"LB", "RB", "A", "B", "X", "Y"};
@@ -387,225 +405,18 @@ if (api->api_version >= 9) {
 }
 ```
 
-The log (`[Mods page]`) says when the page is ready, and each change is logged under your mod's name. If the game's menu code doesn't look as expected, there's no tile or page and the platform's three files for it are removed again; your mod keeps running and simply isn't told of changes. [`game-notes.md`](game-notes.md#menus) explains how the page is put together.
+**Links (API 6).** `kind = FH3_SETTING_LINK` with a `url` makes a row that opens the address in the browser when the player presses A on it (only on your mod's own page).
 
-## Pages (API 8)
+The log says when the page is ready, and each change is logged under your mod's name. If the game's menu code doesn't look as expected, there's no MODS tile and your mod keeps running without being told of changes. [`fh3-game-notes.md`](fh3-game-notes.md) and [`mods-page-fh3-map.md`](mods-page-fh3-map.md) explain how the page is put together.
 
-```c
-int add_page(FH3Mod* mod, const FH3Page* page);
-int set_page_rows(FH3Mod* mod, const char* page_key, const FH3PageRow* rows, uint32_t count);
-
-typedef struct FH3Page {
-    uint32_t size;                 /* sizeof(FH3Page) */
-    const char* key;               /* unique within your mod: "List" */
-    const char* title;             /* "Achievements" (shown in capitals) */
-    const char* label;             /* the row on your mod's page that opens it; NULL = the title */
-    const char* description;       /* that row's description; may be NULL */
-    const char* tile;              /* a pause-menu tile that opens it: "Achievements", or NULL */
-    FH3PageOpenFn on_open;         /* void (*)(void* user, const char* page_key); may be NULL */
-    FH3PageSelectFn on_select;     /* void (*)(void* user, const char* page_key, const char* row_key); may be NULL */
-    void* user;
-} FH3Page;
-
-typedef struct FH3PageRow {
-    uint32_t size;                 /* sizeof(FH3PageRow) */
-    const char* key;               /* passed to on_select; NULL: A does nothing on it */
-    const char* label;             /* left: "Island Explorer" */
-    const char* value;             /* right: "12 / 50"; may be NULL */
-    const char* description;       /* beside the list while it's selected; may be NULL */
-    const char* footer;            /* a line at the bottom of the description panel; may be NULL */
-    int style;                     /* FH3_ROW_NORMAL, FH3_ROW_DIM or FH3_ROW_HEADING */
-    int value_alert;               /* nonzero: the value in red */
-} FH3PageRow;
-```
-
-A page is a list of your own in the game's menus, laid out like the Mods page: each row has a label on the left and a value on the right, and the selected row's description shows beside the list, with your footer line at the bottom of it. It's for showing things (stats, a collection, what your mod has found) and, with `on_select`, for simple menus where A on a row does something.
-
-Your mod's own page under MODS > Installed mods gets a row for each of your pages (`label`, with `description` beside it), and A on it shows the page; B goes back. A page can also take over a pause-menu tile that does nothing on PC. For now that's `"Achievements"`, the tile on the pause menu and the one on its Storm Island tab, which on Xbox opened the console's achievements app. Only one mod can have a tile; a second one is told so in the log, and its page is still under Installed mods.
-
-Add pages from `fh3mod_init`. `add_page` returns 1, or 0 with the reason in the log. Pages are written when every mod's `fh3mod_init` has returned, and a page added later only shows from the next launch.
-
-**Rows.** `set_page_rows` gives a page its rows, copied, in order, replacing the ones it had (up to 1000). You can call it at any time, from any thread. The page is written again each time it's opened, from the rows you last set, so keep them up to date as your data changes. If working them out is costly, do it in `on_open`, which runs just before the page is written: when its tile opens it, and when MODS > Installed mods opens, since that page holds every mod's pages. Until you set any rows, the page says it has nothing on it yet.
-
-- `style` `FH3_ROW_DIM` greys the label and value, for something locked or not available yet. `FH3_ROW_HEADING` puts the label in the game's orange, as a heading over the rows after it. The selected row is the game's usual orange bar with white text, whatever its style.
-- `value_alert` shows the value in red.
-- The value column is half the list's width: keep values short. Text doesn't break at `\n`; descriptions wrap on their own.
-
-**A.** When the page has an `on_select` and the selected row has a `key`, A calls `on_select(user, page_key, row_key)` on the game's UI thread, and the help bar says Select. Keep it short and don't call into the game from it; a crash in it is caught and logged. The page shows the same rows until it's opened again, so `on_select` can do something but can't change what's on screen. Without `on_select`, the help bar only has Back.
-
-```cpp
-static void list_opening(void*, const char*) {
-    std::vector<FH3PageRow> rows;
-    for (const Thing& t : g_things) {
-        FH3PageRow r{sizeof r};
-        r.label = t.name.c_str();
-        r.value = t.found ? "Found" : "Not yet";
-        r.description = t.hint.c_str();
-        r.style = t.found ? FH3_ROW_NORMAL : FH3_ROW_DIM;
-        rows.push_back(r);
-    }
-    g_api->set_page_rows(g_mod, "List", rows.data(), static_cast<uint32_t>(rows.size()));
-}
-
-// in fh3mod_init, after register_mod:
-if (api->api_version >= 8) {
-    FH3Page p{sizeof p};
-    p.key = "List"; p.title = "Things found"; p.description = "Every thing, and whether you've found it.";
-    p.on_open = list_opening;
-    api->add_page(mod, &p);
-}
-```
-
-The log (`[Mods page]`) says when a tile opens a page, and each `on_select` is logged under your mod's name. If the tile's code doesn't look as expected, the tile keeps doing what it did and the page is only under Installed mods. [`game-notes.md`](game-notes.md#menus) explains how the pages are put together.
-
-**Text on the tile.**
+## Pages and title-screen entries (API 8, 9): FH2 only
 
 ```c
-int set_page_tile_text(FH3Mod* mod, const char* page_key, const char* text);
+int add_page(FH3Mod* mod, const FH3Page* page);                 /* + set_page_rows, set_page_xaml, set_page_slot, ... */
+int add_title_entry(FH3Mod* mod, const FH3TitleEntry* entry);   /* + title_started_by */
 ```
 
-A page on a tile can put a line of text on it, at the tile's bottom left, in the pause menu's own style for a tile's count (the club tile's member count: the game's orange, small): a score, say, `"340 / 2,000 G"`. Plain ASCII, up to 40 characters (others show as `?`); `NULL` or `""` shows nothing. Call it from any thread, whenever the text changes: the pause menu reads it each time it's shown. It returns 1, or 0 if you have no page called `page_key` or it isn't on a tile (the log says which).
-
-```c
-int set_page_tile_colors(FH3Mod* mod, const char* page_key, uint32_t background, uint32_t text);
-```
-
-The same tile's colours, as `0xAARRGGBB`: `background` for the tile, `text` for its title and your line. 0 leaves the game's own (the light grey tile, the dark title, the orange line). The icon takes the background's colour, so it stays a shade of it. The pause menu reads them each time it's shown, like the text, and the return values are the same.
-
-The tile keeps the game's title, icon and badge; the platform gives it a copy of the game's icon tile template with the line added and the colours bound, and only on tiles a mod's page has taken over. Until you set them, the text is empty and the colours are the game's, so the tile looks as it did.
-
-### Pages of your own design
-
-```c
-int set_page_xaml(FH3Mod* mod, const char* page_key, const char* resources, const char* content, const char* help);
-int get_page_slot(FH3Mod* mod, const char* page_key, int slot);
-int set_page_slot(FH3Mod* mod, const char* page_key, int slot, int value);
-int focus_page_element(FH3Mod* mod, const char* page_key, const char* name);
-
-/* in FH3Page, after user: */
-FH3PageButtonFn on_button;   /* int (*)(void* user, const char* page_key, int button) */
-FH3PageSlotFn on_slot;       /* void (*)(void* user, const char* page_key, int slot, int value) */
-```
-
-Rows give you the options pages' look. For anything else, a page on a tile can be XAML you write: the game's own controls (`CommonListBox`, `Button`, `local:FZTextBlock`, `local:FZMaterial`), styles, colours and textures, laid out however you like. Everything in `media\UI.zip` is there to use: `Resources/Anthem/` has the shared styles, and `Scenes/Anthem/` every page of the game, which are the best examples. Textures are referred to as `/ForzaUI;component/Textures/Anthem/<path>.png` (`media\UI\textures\Anthem.zip` lists them, as `.swatchbin`).
-
-The page keeps the frame of the game's options pages: the blurred background, the player bar, the help bar, and the screen's padding and tilt. `content` takes the place of what the HUD options page has inside that (its title, list and description panel), so it includes your own title (`A_Style_ContentControl_ScreenTitleBlock` is the game's). It has to name one element `x:Name="FirstItem"`, which gets the focus when the page opens; name your main list `OptionsList`, as the game's options pages do. `resources` goes into the page's `ResourceDictionary`, and `help`, if you give one, replaces the help bar's `DefaultHelpPanel` (keep one element with that name); without it the help bar has only Back. The fragments use the page's XML namespaces: `local:` is the game's (ForzaUI). `set_page_xaml` returns 1, or 0 if you have no such page, `content` has no FirstItem, or a fragment's tags don't balance (then the page keeps the XAML it had, and the log says where).
-
-As with rows, the XAML is copied, and the page is written from the last you set each time it opens, so it's static: put your data straight into it, and call `set_page_xaml` again when it changes (or from `on_open`). Under MODS > Installed mods such a page shows its rows if you've set any, and otherwise its row says which tile opens it; a page of your own design needs a tile to be seen.
-
-**Slots** are what makes it move. Each page has 16 ints, slot 0 to 15, which its XAML binds by name: `{Binding FH3Mod_Slot_<n>, Mode=TwoWay}` (a list's `SelectedIndex`, say), and `{Binding FH3Mod_Slot_<n>_Is_<v>}`, true while slot n is v (v from 0 to 9999). The platform puts three converters in the page's resources for `Visibility`: `FH3Mod_ShowIf` (collapsed when false), `FH3Mod_ShowIfHidden` (hidden when false: it keeps its place, and can take the focus as soon as it shows) and `FH3Mod_HideIf`. Slots are 0 when the page opens; set any you want otherwise from `on_open`. When a binding changes one, `on_slot` tells you. `get_page_slot` reads one; `set_page_slot` changes one, and from inside `on_button` the page's bindings see it at once. From `on_slot` they do too, except for the slot a binding is setting at that moment. Set from anywhere else, a slot is only stored: the page doesn't show it, and opening resets it.
-
-A list's `SelectedIndex` follows the focus, and goes to -1 while the focus is outside the list: the game's list items are only selected while they have it. So don't show things straight from a list's selection if the focus is going to leave it. Bind the list to one slot, and in `on_slot` copy the value to another when it's 0 or more; show things from that one. Otherwise, when the focus moves to what you're showing, it hides, and the game moves the focus back to the page's main list.
-
-**Buttons.** A, B, X, Y, LB and RB go to `on_button` first (`FH3_BUTTON_A`, `FH3_BUTTON_B`, `FH3_BUTTON_X`, `FH3_BUTTON_Y`, `FH3_BUTTON_LB`, `FH3_BUTTON_RB`). Return `FH3_PAGE_IGNORED` for what they usually do (B leaves the page; A does nothing on a page of your own design; the others whatever the game does with them there), or `FH3_PAGE_HANDLED`, `FH3_PAGE_HANDLED_SELECT` or `FH3_PAGE_HANDLED_BACK`, which also play the menus' select or back sound. From `on_button`, `focus_page_element` moves the focus to a `Button`, `Slider` or `local:SpinnerControl` your XAML names (`x:Name`); other elements can't take the focus that way. A list whose `KeyboardNavigation.DirectionalNavigation` is `Contained` keeps the d-pad inside it, so moving between two lists is yours to do: A into the second, B back, say. The page puts the focus back on `OptionsList` whenever it's lost, so while the focus is on another list, switch `OptionsList` off (`IsEnabled` bound to a slot), and switch it back on before focusing it again. Other buttons aren't passed on; the log names their codes (other than the d-pad's) the first time each is pressed on a page of your own design. To show what LB and RB do, the help bar takes `local:ControllerButtonPanel.LBumperDescription` and `RBumperDescription` (`{local:Loc HelpButtons.IDS_Previous}` and `IDS_Next` are the game's "Previous" and "Next").
-
-A two-pane page, a list of sections and the last selected section's items beside it (slot 0: the list's selection, slot 1: which list has the focus, slot 2: the section shown):
-
-```xml
-<!-- content (abridged) -->
-<StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center">
-    <local:CommonListBox x:Name="OptionsList" SelectedIndex="{Binding FH3Mod_Slot_0, Mode=TwoWay}"
-                         IsEnabled="{Binding FH3Mod_Slot_1_Is_0}"
-                         KeyboardNavigation.DirectionalNavigation="Contained" Width="400" Height="600"
-                         Style="{StaticResource A_Style_ListBox_List_Default}"
-                         ItemContainerStyle="{StaticResource A_Style_ListBoxItem_List_Default}">
-        <Button x:Name="FirstItem" Template="{StaticResource My_Plain}"> ... section 0 ... </Button>
-        <Button x:Name="Section_1" Template="{StaticResource My_Plain}"> ... section 1 ... </Button>
-    </local:CommonListBox>
-    <Grid>
-        <local:CommonListBox x:Name="Items_0" Visibility="{Binding FH3Mod_Slot_2_Is_0, Converter={StaticResource FH3Mod_ShowIfHidden}}" ...>
-            <Button x:Name="Item_0_0" ... />
-        </local:CommonListBox>
-        <local:CommonListBox x:Name="Items_1" Visibility="{Binding FH3Mod_Slot_2_Is_1, Converter={StaticResource FH3Mod_ShowIfHidden}}" ...>
-            <Button x:Name="Item_1_0" ... />
-        </local:CommonListBox>
-    </Grid>
-</StackPanel>
-```
-
-```cpp
-static void page_slot(void*, const char* key, int slot, int value) {
-    if (slot == 0 && value >= 0) g_api->set_page_slot(g_mod, key, 2, value);   // a section: show it
-}
-
-static int page_button(void*, const char* key, int button) {
-    const int pane = g_api->get_page_slot(g_mod, key, 1), section = g_api->get_page_slot(g_mod, key, 2);
-    if (button == FH3_BUTTON_A && pane == 0) {   // into the section's items (the sections off first)
-        g_api->set_page_slot(g_mod, key, 1, 1);
-        if (!g_api->focus_page_element(g_mod, key, ("Item_" + std::to_string(section) + "_0").c_str())) {
-            g_api->set_page_slot(g_mod, key, 1, 0);
-            return FH3_PAGE_HANDLED;
-        }
-        return FH3_PAGE_HANDLED_SELECT;
-    }
-    if (button == FH3_BUTTON_B && pane == 1) {   // back to the section (the sections on first)
-        g_api->set_page_slot(g_mod, key, 1, 0);
-        g_api->focus_page_element(g_mod, key, section == 0 ? "FirstItem" : ("Section_" + std::to_string(section)).c_str());
-        return FH3_PAGE_HANDLED_BACK;
-    }
-    return FH3_PAGE_IGNORED;   // B on the sections leaves the page
-}
-```
-
-The game's XAML reader isn't forgiving: a page it can't read can take the game down when it opens. Base your XAML on the game's own pages, change a little at a time, and check every `StaticResource` you use exists. The Achievements mod's page (`src/ui.cpp` in its repo) is a complete example.
-
-## Title-screen entries (API 9)
-
-```c
-int add_title_entry(FH3Mod* mod, const FH3TitleEntry* entry);
-const char* title_started_by(FH3Mod* mod);
-
-typedef struct FH3TitleEntry {
-    uint32_t size;                 /* sizeof(FH3TitleEntry) */
-    const char* key;               /* unique within your mod: "Storm" */
-    const char* label;             /* "Start on Storm Island" (shown in capitals) */
-    FH3TitlePressFn on_press;      /* int (*)(void* user, const char* key); NULL for a list */
-    void* user;
-    int button;                    /* FH3_BUTTON_Y, _X, _RB or _LB; 0 = the next free one */
-    const char* const* choices;    /* a list instead: its choices (UTF-8), or NULL */
-    uint32_t choice_count;         /* 1 to FH3_TITLE_MAX_CHOICES (100) */
-    FH3TitleChooseFn on_choose;    /* int (*)(void* user, const char* key, uint32_t choice) */
-    const char* list_title;        /* the box's title; NULL = the label */
-    const char* list_message;      /* text over the choices; may be NULL */
-} FH3TitleEntry;
-```
-
-An entry is a line of your own on the title screen, under "PRESS (A) TO START" and the notices, with a button that runs your code: "(Y) START ON STORM ISLAND". Use it for something the player chooses before the game loads, like starting somewhere other than where the save left off.
-
-- **Buttons.** Each entry has its own: Y, X, RB, then LB, in the order mods add them. Ask for one with `button` and you get it if it's free; if it's taken, you get the next free one and the log says so. There are four at most, from every mod together, so add one entry, not one per option.
-- **When.** Add entries from `fh3mod_init`. The title screen is written once every mod's `fh3mod_init` has returned, so an entry added later only shows from the next launch.
-- **The label.** UTF-8, shown in capitals in the game's small title-screen text. About 24 characters fit beside the button; anything past 32 bytes is cut, and the log says so.
-- **`on_press`** runs on the game's UI thread when the player presses the entry's button while the title screen waits for A. Keep it short: set a flag, or start a thread of your own. Return `FH3_TITLE_HANDLED` to stay on the title screen, or `FH3_TITLE_START` for the platform to press A for the player straight after. The game then signs in, loads the save and loads the world as it always does. A press while the game is already signing in goes to the game, not to you.
-- **Lists.** Give `choices` (and `choice_count`, `on_choose`) and the press shows the game's message box over the title screen instead, titled `list_title` (or the label), with `list_message` over the choices and a Back under them. Picking a choice calls `on_choose` with its position from 0, on the UI thread, with the same return values as `on_press`; Back just closes the box. `on_press` isn't called for a list and can be `NULL`. The choices are copied when you add the entry, so they're fixed until the next launch. Up to 10 fit in the box at once, and about 30 characters of each. A longer list (up to 100) comes in pages of 8, with Previous above them and Next below, and the box's title says which page it is ("PICK A TRACK  2/5"). `on_choose` still gets the choice's position in the whole list.
-- **`title_started_by`** returns the key of your entry that started the game, or `NULL` if the player pressed A, another mod's entry started it, or it hasn't started yet. Pressing A on the title screen later (after going back to it) sets it back to `NULL`. Call it from any thread, typically from a hook on the world or save loading, to know whether this start is yours.
-
-```cpp
-static int on_storm(void*, const char*) { return FH3_TITLE_START; }
-
-// in fh3mod_init
-if (api->api_version >= 9) {
-    FH3TitleEntry e{sizeof e, "Storm", "Start on Storm Island", on_storm, nullptr, FH3_BUTTON_Y};
-    api->add_title_entry(mod, &e);
-}
-
-// later, where your mod picks the world to load
-const char* by = api->api_version >= 9 ? api->title_started_by(mod) : nullptr;
-if (by && std::strcmp(by, "Storm") == 0) { /* this start is Storm Island's */ }
-```
-
-A list, with the title and Back added by the game's message box:
-
-```cpp
-static const char* const kWorlds[] = {"Mainland", "Storm Island"};
-static int on_world(void*, const char*, uint32_t choice) { g_world = choice; return FH3_TITLE_START; }
-
-FH3TitleEntry e{};
-e.size = sizeof e; e.key = "World"; e.label = "Choose where to start"; e.button = FH3_BUTTON_Y;
-e.choices = kWorlds; e.choice_count = 2; e.on_choose = on_world;
-api->add_title_entry(mod, &e);
-```
-
-The lines are part of the platform's own copy of `UI/Scenes/Anthem/A_Splash.xaml`, hidden until its hook on the title screen's buttons is in place, so if the game's code doesn't look as expected they never show and `platform.log` says why. [`game-notes.md`](game-notes.md#menus) has how the title screen works.
+On FH2 a mod can add pages of its own to the menus (rows or its own XAML, on a pause-menu tile) and lines with a button on the title screen. They need the addresses of FH2's menu and title code, which haven't been found for FH3 yet, so **in FH3 `add_page` and `add_title_entry` return 0** and the log says so; the other page calls then have no page to work on. The structs are in the header, so a mod that uses them on FH2 compiles for FH3 too. For settings, use the [MODS page rows](#the-mods-page-api-4-sliders-api-5); for something on the car's tuning page, [tuning rows](#tuning-rows-api-13).
 
 ## Online play (API 9)
 
@@ -615,21 +426,7 @@ int playing_online(void);
 int offline_only;
 ```
 
-[FH2MP](https://github.com/Charelene/FH2MP) brings back online play, and runs on the platform itself (its `fh3-mods\FH2MP.dll`). Some mods shouldn't run in online play, because they change how cars drive or what other players see: a nitro boost, say. From platform 2.8.0 such a mod isn't loaded when the game is started from the FH2MP launcher.
-
-- **Online is decided once, before any mod loads.** It's online when FH2MP's launcher has handed the game a session (its `data\bin\fh2mp-session.txt`, which the launcher writes before starting the game and removes when it ends; the platform only checks that it's there, and never reads it, as it holds the player's token), and `FH2MP.dll` is in `fh3-mods` and turned on. `playing_online` is never true without FH2MP. The log says "started from the FH2MP launcher (online play)".
-- **`offline_only`**: set it to 1 in your `FH3ModInfo` if your mod shouldn't run online. Online, `register_mod` then returns `NULL`, so call `register_mod` first in `fh3mod_init` and return straight away when it gives you `NULL` (as every mod should anyway); what you return then isn't reported as a problem. The platform remembers it, and from the next online launch doesn't load your DLL at all. Offline, nothing changes. Older platforms ignore the member, so set it whatever the version.
-- **The player decides in the end.** Where FH2MP is installed, each mod's page on MODS > Installed mods has a **Load when playing online** switch, set from your `offline_only` until the player changes it. Their choice is kept in `fh3-mods\platform-online.txt` and takes effect the next time the game starts from the launcher. It works for any DLL in `fh3-mods`, platform mods or not, so players can also turn off a mod whose author hasn't set the flag.
-- **`playing_online`** returns 1 when the game is online in that sense, 0 otherwise. Call it from anywhere, `fh3mod_init` included; it doesn't change during the session. Use it to turn off just the part of your mod that shouldn't run online and keep the rest. Check `api_version >= 9` first.
-- **What it can't switch off**: files you copied into `mediaoverride` yourself (your mod's zip, say). The game reads those online too. Files you put there with `set_file` are your mod's, and go with it.
-
-```cpp
-FH3ModInfo info{sizeof info, "Nitro", "1.2.0", "Me/Nitro", FH3MOD_PLATFORM_VERSION, 1};
-info.description  = "Fast & Furious style nitro.";
-info.offline_only = 1;   // the boost would be a cheat online
-g_mod = api->register_mod(&info);
-if (!g_mod) return 0;    // online (or a bad info): nothing to do
-```
+On FH2, FH2MP brings back online play, and a mod with `offline_only = 1` isn't loaded when the game is started online. FH3 has no such online play: **`playing_online` always returns 0** and `offline_only` changes nothing. Set it anyway if your mod would be a cheat online (a boost, say): the mods here do, so they stay out if FH3 ever gets online play on the platform. Call `register_mod` first in `fh3mod_init` and return when it gives you `NULL`.
 
 ## Sessions (API 9)
 
@@ -650,10 +447,10 @@ Each run of the game is a session, with an id like `20261021-203224-1234`: the t
     "session": "20261021-203224-1234",
     "pid": 1234,
     "started": "2026-10-21 20:32:24",
-    "platform": "2.8.0",
+    "platform": "1.0.0",
     "azimuth": "D:\\Games\\Azimuth",
     "mods": {
-      "WreckingBall": "1.3.2"
+      "NitroSystem II": "1.0.0"
     },
     "pipe": "\\\\.\\pipe\\fh3mod-1234",
     "state": "running"
@@ -668,7 +465,7 @@ Each run of the game is a session, with an id like `20261021-203224-1234`: the t
 int request_save_snapshot(FH3Mod* mod, const char* reason, uint32_t keep);
 ```
 
-Before an experimental session, the safe thing is a copy of the saves. Ask the platform for one from `fh3mod_init` (a mod being tested, or one that changes what gets saved), and once every mod's `fh3mod_init` has returned it copies `<azimuth_dir>\data\titles\1A96545B\saves` to `fh3-mods\save-snapshots\<session id>\`: once, however many mods ask, keeping the newest `keep` copies (the most any mod asked for). `platform.log` says how much it copied and for which mods and reasons. The game only reads the saves when A is pressed on the title screen, long after.
+Before an experimental session, the safe thing is a copy of the saves. Ask the platform for one from `fh3mod_init` (a mod being tested, or one that changes what gets saved), and once every mod's `fh3mod_init` has returned it copies the saves folder (`<azimuth_dir>\data\titles\<title id>\saves`, the id from `data\azimuth.ini`) to `fh3-mods\save-snapshots\<session id>\`: once, however many mods ask, keeping the newest `keep` copies (the most any mod asked for). `platform.log` says how much it copied and for which mods and reasons. The game only reads the saves when A is pressed on the title screen, long after.
 
 The platform only ever reads the saves. To go back to a snapshot, close the game and copy the whole snapshot over the saves folder: Azimuth checks the saves' hashes, so don't mix files from different copies. It returns 1 if a copy will be made, 0 if there's no saves folder or the call came after `fh3mod_init` (the log says which).
 
@@ -694,7 +491,7 @@ A key on the keyboard, a chord on the controller or both, that call `on_press` o
 
 - **Only while the game is in front.** The platform polls the keyboard (`GetAsyncKeyState`) and the controllers (XInput, from System32) every 15 ms while Azimuth's window has the focus. It never takes a key from other programs (no `RegisterHotKey`), and the game still gets every key and button, so pick ones that do nothing harmful in game: an F-key, or LB+RB with a face button. The modifiers have to match exactly, so Ctrl+F5 doesn't set off a hotkey on F5.
 - **`on_press`** runs on the platform's hotkey thread, not the game's. Keep it short, and hand anything that touches the game to a hook. If it crashes, the log says so and the next press calls it again.
-- **The Mods page.** Each hotkey gets two choice rows in your mod's part of Pause > Settings > MODS: "<label>: key" (Off, F1 to F12, Ctrl+F1 to F12, or your own binding if it's none of those) and "<label>: controller" (Off, or LB+RB with Y, X, B, A or a d-pad direction, or your own chord). A change there takes effect straight away and calls `on_rebind` with the new binding. The platform doesn't keep bindings: save them in your settings and pass them in next time, as with your rows.
+- **The Mods page.** Each hotkey gets two choice rows on your mod's settings page (Home > MODS > Installed mods): "<label>: key" (Off, F1 to F12, Ctrl+F1 to F12, or your own binding if it's none of those) and "<label>: controller" (Off, or LB+RB with Y, X, B, A or a d-pad direction, or your own chord). A change there takes effect straight away and calls `on_rebind` with the new binding. The platform doesn't keep bindings: save them in your settings and pass them in next time, as with your rows.
 - **When.** Add hotkeys from `fh3mod_init`, so their rows show (rows added later only show from the next launch). It returns 1 if the hotkey was added, 0 if not, and the log says why.
 
 ```cpp
@@ -830,13 +627,52 @@ Universal Wheel Spacers is the example: its hook on the car loader asks `upgrade
 
 The game keeps a car's parts in a set of 43 slots (part enums 0 to 42) and the car's tuning right after it. Bridge upgrades use enums 47 and up, so they are **not** in that set: the platform keeps them out of it (the game's part setter has no bounds check, and a stage of a bridge upgrade written there would overwrite tuning values such as the brake balance and the handbrake). The stage of a bridge upgrade is only what `upgrade_stage` says; don't look for it in the game's part data.
 
+## Tuning rows (API 13)
+
+```c
+int add_tuning_row(FH3Mod* mod, const struct FH3TuningRow* row);
+
+struct FH3TuningRow {
+    uint32_t size;                 /* sizeof(FH3TuningRow) */
+    const char* key;               /* unique within your mod: letters, digits and '_' */
+    const char* label;             /* "Airride|Drop (cm)": header band "AIRRIDE", row "Drop", unit cm */
+    const char* help;              /* the description while the row is selected; may be NULL */
+    float min, max, step;          /* the slider's range and step */
+    int decimals;                  /* digits after the point in the number */
+    float (*get)(void* user);      /* the value to show for the car being tuned */
+    void (*set)(void* user, float value);   /* the player moved the slider (on a step, inside the range) */
+    int (*visible)(void* user);    /* 1 = show the row for this car, 0 = hide it; may be NULL */
+    void* user;
+};
+```
+
+A slider of your own on the car's **Tuning > Springs** page, after Ride Height, laid out like the game's own tuning sliders: a header band above it (title in capitals, the minimum and maximum, the unit) and the row with its value. Up to 64 rows from every mod together; the page scrolls.
+
+- **When.** Add rows from `fh3mod_init`: the row is written into the page when the tuning menu is built. It returns 1, or 0 with the reason in the log.
+- **The label.** `"Header|Row label (unit)"`: the part before `|` is the band's title, a trailing `(unit)` goes to the band. Without a `|` the band and the row share the text.
+- **Your mod owns the value.** `get` is asked for the car being tuned (`upgrade_active_garage()` is that car), `set` gets each new value: store it per garage id. Both run on the game's UI thread: keep them short and don't call into the game.
+- **`visible`** hides the row (and its band) on cars it doesn't apply to: the Airride shows its row only on cars that have the Airride.
+
+```cpp
+static float drop_get(void*) { return drop_for(g_api->upgrade_active_garage()); }
+static void drop_set(void*, float v) { save_drop(g_api->upgrade_active_garage(), v); }
+static int drop_visible(void*) { return g_api->upgrade_stage(g_mod, g_handle, 0) > 0; }
+
+if (api->api_version >= 13 && api->add_tuning_row) {
+    FH3TuningRow row{};
+    row.size = sizeof row; row.key = "Drop"; row.label = "Airride|Drop (cm)";
+    row.help = "How far the Airride lowers the car.";
+    row.min = 1; row.max = 10; row.step = 0.1f; row.decimals = 1;
+    row.get = drop_get; row.set = drop_set; row.visible = drop_visible;
+    api->add_tuning_row(mod, &row);
+}
+```
+
 ## Crash reports
 
-These need no code from you. If the game crashes, the platform writes `fh3-mods\crashes\crash-<date>-<time>.txt` and a minidump (`.dmp`) beside it, and adds the summary to `platform.log`. The report has the exception, the call stack as module+offset (`game+0x...`, `YourMod.dll+0x...`), the mod the crash came from, if any, and every hook in place (see above). When Azimuth 1.0.1 was running another game, it says which, so a crash there isn't taken for a mod's. The ten newest reports are kept. Open the minidump in Visual Studio or WinDbg with your mod's debug symbols to see the exact line.
+These need no code from you. If the game crashes, the platform writes `fh3-mods\crashes\crash-<date>-<time>.txt` and a minidump (`.dmp`) beside it, and adds the summary to `platform.log`. The report has the exception, the call stack as module+offset (`game+0x...`, `YourMod.dll+0x...`), the mod the crash came from, if any, and every hook in place (see above). When Azimuth was running another game, it says which, so a crash there isn't taken for a mod's. The ten newest reports are kept. Open the minidump in Visual Studio or WinDbg with your mod's debug symbols to see the exact line.
 
-From platform 2.8.0:
-
-- **Your mod's state is in the dump.** The minidump has the writable data (the globals) of every DLL the platform loaded: the mods, fh2wheel and the platform itself. Other modules' data stays out, so the dump stays small. `platform.log` says how many DLLs' data and how many added ranges went in.
+- **Your mod's state is in the dump.** The minidump has the writable data (the globals) of every DLL the platform loaded: the mods and the platform itself. Other modules' data stays out, so the dump stays small. `platform.log` says how many DLLs' data and how many added ranges went in.
 - **`add_dump_memory(mod, p, n)`** (API 9) adds memory of your own to every dump from then on, for state that lives on the heap behind your globals: your tables, what your hooks keep track of. 1 byte to 64 MB a range, 64 ranges at most from every mod together. The memory has to stay allocated; a range that can't be read at the crash is skipped.
 - **A full-memory dump** while you chase a crash: put `full` in `fh3-mods\platform-dump.txt`. The next dump then has the whole process, which under Azimuth is several GB, so it's named `crash-<date>-<time>-full.dmp` and only the newest one is kept. Delete the file (or the word) to go back to small dumps.
 - **Symbols.** The report lists the PDB (name, GUID and age) of each loaded DLL that has a CodeView record, which is what a debugger needs to load the right symbols. Release builds with llvm-mingw are stripped and have none; build with `-gcodeview -Wl,--pdb=` and keep the PDB if you want them.
