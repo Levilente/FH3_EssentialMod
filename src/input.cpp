@@ -619,6 +619,245 @@ DWORD WINAPI detour_get_state(DWORD idx, PadState* s) {
     return ERROR_SUCCESS;
 }
 
+
+// ---- the controller as one of the engine's gamepads ---------------------------------------------------------------------------
+// Azimuth gives the game only the PC's Windows.Gaming.Input gamepads (Xbox-like pads), so a DualSense or any other HID pad that is
+// not presented as an Xbox 360 pad does nothing in the game at all. The engine takes the Gamepad statics, registers a
+// GamepadAdded and a GamepadRemoved handler, and reads every pad it was given with GetCurrentReading (and sends it the game's
+// rumble with put_Vibration). So the other controller is made a gamepad object of our own and handed to the engine's own
+// GamepadAdded handler (found in azimuth.exe by the code that registers it, as FH2-Input does); it leaves through GamepadRemoved.
+// It only joins when XInput has no pad of its own (the game already has that one), and it carries the game's rumble back to
+// the mods through the shared memory "Local\FH3ModPlatform.Vibration" (4 floats: left motor, right motor, left trigger,
+// right trigger, then a tick count).
+struct WgiReading {
+    UINT64 timestamp;
+    UINT32 buttons;
+    double lt, rt, lx, ly, rx, ry;
+};
+struct WgiVibration {
+    double lm, rm, lt, rt;
+};
+enum : UINT32 { W_MENU = 1, W_VIEW = 2, W_A = 4, W_B = 8, W_X = 0x10, W_Y = 0x20, W_UP = 0x40, W_DOWN = 0x80, W_LEFT = 0x100,
+                W_RIGHT = 0x200, W_LB = 0x400, W_RB = 0x800, W_LS = 0x1000, W_RS = 0x2000 };
+
+const IID kIidUnknown   = {0x00000000, 0x0000, 0x0000, {0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
+const IID kIidInspectable = {0xAF86E2E0, 0xB12D, 0x4C6A, {0x9C, 0x5A, 0xD7, 0xAA, 0x65, 0x10, 0x1E, 0x90}};
+const IID kIidAgile     = {0x94EA2B94, 0xE9CC, 0x49E0, {0xC0, 0xFF, 0xEE, 0x64, 0xCA, 0x8F, 0x5B, 0x90}};
+const IID kIidGamepad   = {0xBC7BB43C, 0x0A69, 0x3903, {0x9E, 0x9D, 0xA5, 0x0F, 0x86, 0xA4, 0x5D, 0xE5}};
+
+struct WgiPad;
+struct WgiPadVtbl {
+    HRESULT(STDMETHODCALLTYPE* QueryInterface)(WgiPad*, REFIID, void**);
+    ULONG(STDMETHODCALLTYPE* AddRef)(WgiPad*);
+    ULONG(STDMETHODCALLTYPE* Release)(WgiPad*);
+    HRESULT(STDMETHODCALLTYPE* GetIids)(WgiPad*, ULONG*, IID**);
+    HRESULT(STDMETHODCALLTYPE* GetRuntimeClassName)(WgiPad*, void**);
+    HRESULT(STDMETHODCALLTYPE* GetTrustLevel)(WgiPad*, int*);
+    HRESULT(STDMETHODCALLTYPE* get_Vibration)(WgiPad*, WgiVibration*);
+    HRESULT(STDMETHODCALLTYPE* put_Vibration)(WgiPad*, const WgiVibration*);
+    HRESULT(STDMETHODCALLTYPE* GetCurrentReading)(WgiPad*, WgiReading*);
+};
+struct WgiPad {
+    const WgiPadVtbl* v;
+    volatile LONG refs;
+};
+
+struct SharedVib {
+    float lm, rm, lt, rt;
+    DWORD tick;
+};
+SharedVib* g_shared_vib = nullptr;
+WgiVibration g_vib{};
+std::mutex g_wmu;
+
+HRESULT STDMETHODCALLTYPE pad_qi(WgiPad* p, REFIID iid, void** out) {
+    if (!out) return E_POINTER;
+    if (IsEqualGUID(iid, kIidUnknown) || IsEqualGUID(iid, kIidInspectable) || IsEqualGUID(iid, kIidAgile) || IsEqualGUID(iid, kIidGamepad)) {
+        InterlockedIncrement(&p->refs);
+        *out = p;
+        return S_OK;
+    }
+    *out = nullptr;
+    return E_NOINTERFACE;
+}
+ULONG STDMETHODCALLTYPE pad_addref(WgiPad* p) { return static_cast<ULONG>(InterlockedIncrement(&p->refs)); }
+ULONG STDMETHODCALLTYPE pad_release(WgiPad* p) { return static_cast<ULONG>(InterlockedDecrement(&p->refs)); }
+HRESULT STDMETHODCALLTYPE pad_iids(WgiPad*, ULONG* n, IID** iids) {
+    if (n) *n = 0;
+    if (iids) *iids = nullptr;
+    return S_OK;
+}
+HRESULT STDMETHODCALLTYPE pad_class(WgiPad*, void** name) {
+    if (name) *name = nullptr;
+    return S_OK;
+}
+HRESULT STDMETHODCALLTYPE pad_trust(WgiPad*, int* level) {
+    if (level) *level = 0;
+    return S_OK;
+}
+HRESULT STDMETHODCALLTYPE pad_get_vibration(WgiPad*, WgiVibration* v) {
+    if (!v) return E_POINTER;
+    std::scoped_lock lk{g_wmu};
+    *v = g_vib;
+    return S_OK;
+}
+float unit01(double v) { return v > 0 && v <= 1 ? static_cast<float>(v) : v > 1 ? 1.0f : 0.0f; }
+HRESULT STDMETHODCALLTYPE pad_put_vibration(WgiPad*, const WgiVibration* v) {
+    if (!v) return E_POINTER;
+    {
+        std::scoped_lock lk{g_wmu};
+        g_vib = *v;
+    }
+    if (g_shared_vib) {
+        g_shared_vib->lm   = unit01(v->lm);
+        g_shared_vib->rm   = unit01(v->rm);
+        g_shared_vib->lt   = unit01(v->lt);
+        g_shared_vib->rt   = unit01(v->rt);
+        g_shared_vib->tick = GetTickCount();
+    }
+    return S_OK;
+}
+double axis_d(SHORT v) { return v >= 0 ? v / 32767.0 : v / 32768.0; }
+HRESULT STDMETHODCALLTYPE pad_reading(WgiPad*, WgiReading* r) {
+    if (!r) return E_POINTER;
+    static const struct { WORD x; UINT32 w; } map[14] = {
+        {X_UP, W_UP}, {X_DOWN, W_DOWN}, {X_LEFT, W_LEFT}, {X_RIGHT, W_RIGHT}, {X_START, W_MENU}, {X_BACK, W_VIEW}, {X_LS, W_LS},
+        {X_RS, W_RS}, {X_LB, W_LB}, {X_RB, W_RB}, {X_A, W_A}, {X_B, W_B}, {X_X, W_X}, {X_Y, W_Y}};
+    const Virt v = combine();
+    std::memset(r, 0, sizeof *r);
+    LARGE_INTEGER c, f;
+    QueryPerformanceCounter(&c);
+    QueryPerformanceFrequency(&f);
+    r->timestamp = static_cast<UINT64>(static_cast<double>(c.QuadPart) / static_cast<double>(f.QuadPart) * 1e6);
+    for (const auto& m : map)
+        if (v.buttons & m.x) r->buttons |= m.w;
+    r->lt = v.lt / 255.0;
+    r->rt = v.rt / 255.0;
+    r->lx = axis_d(v.lx);
+    r->ly = axis_d(v.ly);
+    r->rx = axis_d(v.rx);
+    r->ry = axis_d(v.ry);
+    return S_OK;
+}
+const WgiPadVtbl kPadVtbl = {pad_qi, pad_addref, pad_release, pad_iids, pad_class, pad_trust, pad_get_vibration, pad_put_vibration, pad_reading};
+WgiPad g_pad              = {&kPadVtbl, 1};
+
+BYTE *g_eng_added = nullptr, *g_eng_removed = nullptr;
+void* volatile* g_eng_statics = nullptr;
+bool g_pad_in = false;
+bool g_found_logged = false;
+
+struct Image {
+    BYTE *base = nullptr, *text = nullptr, *text_end = nullptr, *rdata = nullptr, *rdata_end = nullptr, *data = nullptr, *data_end = nullptr;
+};
+bool image_of(BYTE* b, Image* m) {
+    if (!b || reinterpret_cast<IMAGE_DOS_HEADER*>(b)->e_magic != IMAGE_DOS_SIGNATURE) return false;
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(b + reinterpret_cast<IMAGE_DOS_HEADER*>(b)->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return false;
+    IMAGE_SECTION_HEADER* s = IMAGE_FIRST_SECTION(nt);
+    m->base                 = b;
+    for (int i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++s) {
+        if (!std::memcmp(s->Name, ".text", 6)) { m->text = b + s->VirtualAddress; m->text_end = m->text + s->Misc.VirtualSize; }
+        else if (!std::memcmp(s->Name, ".rdata", 7)) { m->rdata = b + s->VirtualAddress; m->rdata_end = m->rdata + s->Misc.VirtualSize; }
+        else if (!std::memcmp(s->Name, ".data", 6)) { m->data = b + s->VirtualAddress; m->data_end = m->data + s->Misc.VirtualSize; }
+    }
+    return m->text && m->rdata && m->data;
+}
+BYTE* rel32(BYTE* insn, int disp_at, int len) { return insn + len + *reinterpret_cast<INT32*>(insn + disp_at); }
+bool in_range(const void* p, const BYTE* lo, const BYTE* hi) { return static_cast<const BYTE*>(p) >= lo && static_cast<const BYTE*>(p) < hi; }
+bool handler_ok(Image* m, BYTE* h, BYTE kind) {
+    if (!in_range(h, m->data, m->data_end - 16)) return false;
+    void** vt = *reinterpret_cast<void***>(h);
+    return in_range(vt, m->rdata, m->rdata_end - 32) && in_range(vt[3], m->text, m->text_end) && h[8] == kind;
+}
+
+// The engine's two handlers and its statics: after "lea rcx, [L"Windows.Gaming.Input.Gamepad"]" come the calls of the statics'
+// add_GamepadAdded (vtable +0x30) and add_GamepadRemoved (+0x40), each with "lea rdx, [handler]" before it, and the statics are
+// stored ("mov [rip+x], rax"). The handler objects get their vtable when the engine starts, so this is tried again until they have.
+bool wgi_find_engine(BYTE* engine) {
+    static const wchar_t cls[] = L"Windows.Gaming.Input.Gamepad";
+    Image m;
+    if (!image_of(engine, &m)) return false;
+    BYTE *str = nullptr, *lea = nullptr;
+    for (BYTE* p = m.rdata + 2; p + sizeof cls <= m.rdata_end && !str; p += 2)
+        if (*reinterpret_cast<const wchar_t*>(p) == L'W' && !std::memcmp(p, cls, sizeof cls)) str = p;
+    for (BYTE* p = m.text; str && p + 7 <= m.text_end && !lea; ++p)
+        if (p[0] == 0x48 && p[1] == 0x8D && p[2] == 0x0D && rel32(p, 3, 7) == str) lea = p;
+    BYTE *added = nullptr, *removed = nullptr;
+    void* volatile* statics = nullptr;
+    for (BYTE* p = lea; p && p < lea + 0x140 && p + 16 <= m.text_end && !statics; ++p) {
+        if (p[0] == 0x48 && p[1] == 0x8D && p[2] == 0x15) {
+            for (BYTE* q = p + 7; q < p + 16; ++q)
+                if (q[0] == 0xFF && q[1] == 0x50 && (q[2] == 0x30 || q[2] == 0x40)) {
+                    if (q[2] == 0x30 && !added) added = rel32(p, 3, 7);
+                    else if (q[2] == 0x40 && !removed) removed = rel32(p, 3, 7);
+                    break;
+                }
+        } else if (added && removed && p[0] == 0x48 && p[1] == 0x89 && p[2] == 0x05) {
+            statics = reinterpret_cast<void* volatile*>(rel32(p, 3, 7));
+        }
+    }
+    if (!statics || !in_range(const_cast<void**>(statics), m.data, m.data_end) || !handler_ok(&m, added, 1) || !handler_ok(&m, removed, 0) ||
+        *reinterpret_cast<void**>(added) != *reinterpret_cast<void**>(removed))
+        return false;
+    g_eng_added = added; g_eng_removed = removed; g_eng_statics = statics;
+    plog("input: the engine's GamepadAdded/Removed handlers found (azimuth.exe+0x" + [&] { char b[40]; std::snprintf(b, sizeof b, "%lX/0x%lX", static_cast<unsigned long>(added - m.base), static_cast<unsigned long>(removed - m.base)); return std::string(b); }() + ")");
+    return true;
+}
+
+using WgiInvokeFn = HRESULT(STDMETHODCALLTYPE*)(void*, void*, void*);
+HRESULT wgi_invoke(bool in) {
+    BYTE* h = in ? g_eng_added : g_eng_removed;
+    __try {
+        return reinterpret_cast<WgiInvokeFn>((*reinterpret_cast<void***>(h))[3])(h, nullptr, &g_pad);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return E_FAIL;
+    }
+}
+
+bool real_xinput_pad() {
+    for (DWORD i = 0; i < 4; ++i) {
+        PadState st{};
+        if (g_real(i, &st) == ERROR_SUCCESS) return true;
+    }
+    return false;
+}
+
+DWORD WINAPI wgi_thread(LPVOID) {
+    ULONGLONG next_real = 0;
+    bool real           = false;
+    for (;;) {
+        Sleep(100);
+        BYTE* engine = reinterpret_cast<BYTE*>(GetModuleHandleW(nullptr));
+        if (!g_eng_added) {
+            static ULONGLONG last_try = 0;
+            const ULONGLONG t         = GetTickCount64();
+            if (t - last_try < 1000) continue;
+            last_try = t;
+            if (!wgi_find_engine(engine)) {
+                if (!g_found_logged && t > 120000) {
+                    g_found_logged = true;
+                    plog("input: Azimuth's gamepad code isn't as expected (or isn't up yet): other controllers can't be given to the game");
+                }
+                continue;
+            }
+        }
+        const ULONGLONG t = GetTickCount64();
+        if (t >= next_real) {
+            next_real = t + 500;
+            real      = real_xinput_pad();
+        }
+        const bool want = !real && (g_present.load(std::memory_order_relaxed) || g_hid_present.load(std::memory_order_relaxed));
+        if (want == g_pad_in) continue;
+        if (want && !*g_eng_statics) continue; // the engine's pads aren't up yet
+        const HRESULT hr = wgi_invoke(want);
+        g_pad_in         = want;
+        char b[96];
+        std::snprintf(b, sizeof b, "0x%08lX", static_cast<unsigned long>(hr));
+        plog(std::string("input: the controller ") + (want ? "joins" : "leaves") + " the game's gamepads (" + b + ")");
+    }
+}
+
 bool setting(const wchar_t* key, bool def) {
     const std::wstring ini = ini_path();
     return GetPrivateProfileIntW(L"input", key, def ? 1 : 0, ini.c_str()) != 0;
@@ -659,6 +898,13 @@ void start_input() {
         return;
     }
     read_ignore();
+    if (setting(L"Gamepad", true)) {
+        if (HANDLE m = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 64, L"Local\\FH3ModPlatform.Vibration"))
+            g_shared_vib = static_cast<SharedVib*>(MapViewOfFile(m, FILE_MAP_ALL_ACCESS, 0, 0, 64));
+        if (HANDLE t = CreateThread(nullptr, 0, wgi_thread, nullptr, 0, nullptr)) CloseHandle(t);
+    } else {
+        plog("input: the controller is not given to the game (platform.ini [input] Gamepad=0)");
+    }
     if (HANDLE t = CreateThread(nullptr, 0, hid_reader, nullptr, 0, nullptr)) CloseHandle(t);
     if (HANDLE t = CreateThread(nullptr, 0, reader, nullptr, 0, nullptr)) CloseHandle(t);
 }

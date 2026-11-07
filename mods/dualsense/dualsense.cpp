@@ -416,6 +416,18 @@ void trig_vib(BYTE* e, int amp, int hz) {
     trig_zones(e, 0x26, a, static_cast<BYTE>(clampi(hz, 1, 255)));
 }
 
+// The game's own rumble, which the platform gets from the engine when it hands the controller to the game as a gamepad
+// (shared memory "Local\FH3ModPlatform.Vibration": left motor, right motor, left trigger, right trigger, tick count).
+struct GameVib { float lm, rm, lt, rt; DWORD tick; };
+const GameVib* game_vib() {
+    static const GameVib* p = nullptr;
+    if (!p) {
+        if (HANDLE m = OpenFileMappingW(FILE_MAP_READ, FALSE, L"Local\\FH3ModPlatform.Vibration"))
+            p = static_cast<const GameVib*>(MapViewOfFile(m, FILE_MAP_READ, 0, 0, sizeof(GameVib)));
+    }
+    return p;
+}
+
 bool game_in_front() {
     HWND w = GetForegroundWindow();
     DWORD pid = 0;
@@ -460,6 +472,14 @@ void send_output(Ds& d, bool neutral) {
         }
         heavy *= strength;
         light *= strength;
+    }
+    if (!neutral && g_enabled.load() && strength > 0) {   // the game's own rumble, when the platform gave it the controller
+        if (const GameVib* gv = game_vib()) {
+            if (static_cast<DWORD>(GetTickCount() - gv->tick) < 500) {
+                heavy = std::max(heavy, clampf(gv->lm, 0, 1) * strength);
+                light = std::max(light, clampf(gv->rm, 0, 1) * strength);
+            }
+        }
     }
     c[0] |= 0x02;
     if (d.v2) c[38] |= 0x04; else c[0] |= 0x01;
