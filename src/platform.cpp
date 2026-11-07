@@ -590,6 +590,7 @@ int32_t api_upgrade_car_model(int32_t g) { return upgrades_car_model(g); }
 int32_t api_upgrade_garage_for_car(int32_t c, uint32_t f) { return upgrades_garage_for_car(c, f); }
 int api_upgrade_stage_for_car(FH3Mod*, int h, int32_t c) { return upgrades_stage_for_car(h, c); }
 int api_upgrade_preview_stage(FH3Mod*, int h) { return upgrades_preview_stage(h); }
+uint32_t api_upgrade_shop_serial() { return upgrades_shop_serial(); }
 void api_upgrade_import(FH3Mod*, int h, int32_t g, int32_t o, int s, uint32_t m) { upgrades_import(h, g, o, s, m); }
 
 void api_clear_sql(FH3Mod* m) {
@@ -1346,6 +1347,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
                 g_api.upgrade_garage_for_car = api_upgrade_garage_for_car;
                 g_api.upgrade_stage_for_car = api_upgrade_stage_for_car;
                 g_api.upgrade_preview_stage = api_upgrade_preview_stage;
+                g_api.upgrade_shop_serial = api_upgrade_shop_serial;
                 return load_mods(nullptr);
             },
             nullptr, 0, nullptr))

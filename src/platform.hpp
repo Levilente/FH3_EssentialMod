@@ -50,6 +50,7 @@ int32_t upgrades_car_model(int32_t garage);
 int32_t upgrades_garage_for_car(int32_t car_id, uint32_t flags);
 int upgrades_stage_for_car(int handle, int32_t car_id);
 int upgrades_preview_stage(int handle);
+uint32_t upgrades_shop_serial();
 bool show_message_popup(void* page, const std::wstring& title, const std::wstring& message);   // the game's message box with an OK item
 void upgrades_import(int handle, int32_t garage, int32_t ordinal, int stage, uint32_t owned_mask);
 void upgrades_start_hooks();

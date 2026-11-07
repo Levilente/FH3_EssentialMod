@@ -604,6 +604,10 @@ typedef struct FH3ModApi {
        rebuild the game starts, this one stays while the cursor stays. For a mod that shows something on the car for as
        long as the player looks at the stage (the Airride lowers the car 3 cm). Any thread. */
     int (*upgrade_preview_stage)(FH3Mod* mod, int handle);
+    /* A number that goes up with every step the garage's upgrade list takes on the car (each cursor move shows a stage again). The game
+       gives no sign when the player backs out of the list (upgrade_preview_stage stays), so a mod that ends its preview itself (on the
+       back button) keeps it ended until this changes: the next hover. */
+    uint32_t (*upgrade_shop_serial)(void);
 } FH3ModApi;
 
 #define FH3MOD_CAR_MAKE_DRIVEN 1u   /* upgrade_garage_for_car: make the car found the driven car */

@@ -553,12 +553,14 @@ int detour_memcmp(const void* x, const void* y, size_t n) {
 // with it while the car is rebuilt: a mod that builds the car from upgrade_stage then shows the stage on hover.
 QueryBuildB g_orig_show = nullptr;
 std::atomic<int> g_show_logged{0};
+std::atomic<uint32_t> g_shop_serial{0};   // up with every shop show step (cursor move)
 void* detour_show(uint64_t car, uint64_t e, uint64_t part, uint64_t d, uint64_t flag, uint64_t g, uint64_t h, uint64_t i, uint64_t j) {
     g_shop_tick.store(GetTickCount64());
     g_expect_build.store(GetTickCount64());
     const bool shop = (flag & 0xFF) != 0;
     const int en    = static_cast<int>(e);
     if (shop) {
+        g_shop_serial.fetch_add(1);
         if (en > 43) {
             // Each upgrade of ours has its own enum. A part id that isn't one of its stages is the game putting back
             // what the car had (it reads that from past the part set, where our parts never are): the preview ends.
@@ -1047,6 +1049,7 @@ int upgrades_stage(int handle, int32_t garage) {
 }
 // The stage the shop's list is showing on the car while the cursor stays on it (-1: none). No time limit, unlike upgrades_stage; it also answers while the
 // stage is in the basket (the cursor is on it again). The preview ends with the shop's setup puts and with any car rebuild the show step didn't start.
+uint32_t upgrades_shop_serial() { return g_shop_serial.load(); }
 int upgrades_preview_stage(int handle) {
     Upgrade* u = handle_upgrade(handle);
     if (!u || g_foreign.load()) return -1;
