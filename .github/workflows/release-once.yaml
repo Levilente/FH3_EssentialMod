@@ -1,0 +1,45 @@
+name: Release 1.2.1 (one-off)
+
+# Runs when the branch release-1.2.1 is pushed: replaces an earlier v1.2.1, builds on GitHub, publishes the v1.2.1 release (the tag is created
+# by the release) and deletes the branch.
+
+on:
+  push:
+    branches: ["release-1.2.1"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    env:
+      LLVM_MINGW_VERSION: "20260922"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install llvm-mingw + ninja
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build
+          curl -fsSL "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_VERSION}/llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-22.04-x86_64.tar.xz" -o llvm-mingw.tar.xz
+          sudo mkdir -p /opt/llvm-mingw
+          sudo tar -xJf llvm-mingw.tar.xz -C /opt/llvm-mingw --strip-components=1
+          echo /opt/llvm-mingw/bin >> "$GITHUB_PATH"
+      - name: Build
+        env:
+          CMAKE_GENERATOR: Ninja
+        run: |
+          ./scripts/build.sh
+          (cd dist && zip -r -9 ../FH3-Mod-Platform-v1.2.1.zip .)
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          awk '/^## /{n++} n==1' CHANGELOG.md | tail -n +2 > notes.md
+          gh release delete v1.2.1 --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/v1.2.1" || true
+          sleep 5
+          gh release create v1.2.1 FH3-Mod-Platform-v1.2.1.zip --target "$GITHUB_SHA" --title "FH3 Mod Platform v1.2.1" --notes-file notes.md
+          gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/release-1.2.1" || true
