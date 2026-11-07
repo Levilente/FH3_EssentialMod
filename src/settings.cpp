@@ -4326,6 +4326,14 @@ int tuning_row_add(FH3Mod* m, const FH3TuningRow* t) {
         log_line(m->name, std::string("add_tuning_row: ") + t->key + " needs max > min and step > 0");
         return 0;
     }
+    if (reload_rebinding(m)) {   // hot reload: same row, the new build's callbacks
+        std::scoped_lock lk{g_mu};
+        for (TuneRow& r : g_tune_rows)
+            if (r.mod == m && r.key == t->key) {
+                r.get = t->get; r.set = t->set; r.visible = t->visible; r.user = t->user;
+                return 1;
+            }
+    }
     if (g_written.load()) {
         log_line(m->name, std::string("add_tuning_row: ") + t->key + " came after the pages were written; add rows from fh3mod_init");
         return 0;
@@ -4359,6 +4367,15 @@ int settings_add(FH3Mod* m, const FH3Setting* s) {
         return 0;
     }
     std::scoped_lock lk{g_mu};
+    if (reload_rebinding(m)) {   // a hot reload starts the mod again: the row stays, its callbacks are the new build's
+        if (Row* ex = find_row(m, s->key)) {
+            ex->on_change = s->on_change;
+            ex->user      = s->user;
+            if (s->size >= offsetof(FH3Setting, on_slide) + sizeof(void*) && s->kind == FH3_SETTING_SLIDER) ex->on_slide = s->on_slide;
+            return 1;
+        }
+        if (has_link(m, s->key)) return 1;
+    }
     if (find_row(m, s->key) || has_link(m, s->key)) {
         log_line(m->name, std::string("add_setting: there's already a row called ") + s->key);
         return 0;
@@ -4450,8 +4467,18 @@ int pages_add(FH3Mod* m, const FH3Page* p) {
         return 0;
     }
     std::scoped_lock lk{g_mu};
-    for (const ModPage& pg : g_pages)
+    for (ModPage& pg : g_pages)
         if (pg.mod == m && pg.key == p->key) {
+            if (reload_rebinding(m)) {   // hot reload: same page, the new build's callbacks
+                pg.on_open   = p->on_open;
+                pg.on_select = p->on_select;
+                pg.user      = p->user;
+                if (p->size >= offsetof(FH3Page, on_slot) + sizeof(void*)) {
+                    pg.on_button = p->on_button;
+                    pg.on_slot   = p->on_slot;
+                }
+                return 1;
+            }
             log_line(m->name, std::string("add_page: there's already a page called ") + p->key);
             return 0;
         }
@@ -4754,6 +4781,16 @@ int title_add(FH3Mod* m, const FH3TitleEntry* e) {
     } else if (!e->on_press) {
         log_line(m->name, std::string("add_title_entry: ") + e->key + " needs an on_press");
         return 0;
+    }
+    if (reload_rebinding(m)) {   // hot reload: same entry, the new build's callbacks
+        std::scoped_lock lk{g_mu};
+        for (TitleEntry& t : g_titles)
+            if (t.mod == m && t.key == e->key) {
+                t.on_press  = e->on_press;
+                t.user      = e->user;
+                t.on_choose = e->on_choose;
+                return 1;
+            }
     }
     if (g_written) {
         log_line(m->name, std::string("add_title_entry: ") + e->key + " came after the title screen was written; add entries from fh3mod_init");

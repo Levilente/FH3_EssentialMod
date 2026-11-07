@@ -28,6 +28,7 @@ struct FH3Mod {
     std::set<std::wstring> files;    // mediaoverride paths this mod owns (lower case)
     std::vector<std::string> sql;    // database statements, in the order given
     std::string latest;              // latest release on GitHub, once checked
+    bool reloaded = false;           // hot-reloaded at least once (API 16): add_sql ignores statements it has
 };
 
 namespace fh3platform {
@@ -40,6 +41,10 @@ inline void plog(const std::string& text) { log_line("", text); }
 bool log_verbose();
 inline void vlog_line(const std::string& who, const std::string& text) { if (log_verbose()) log_line(who, text); }
 inline void vplog(const std::string& text) { if (log_verbose()) log_line("", text); }
+
+// Hot reload (platform.cpp, API 16): true while `mod`'s fh3mod_init runs again after a reload. A registration with a key
+// that exists already then swaps the entry's callbacks instead of failing or adding it twice.
+bool reload_rebinding(const FH3Mod* mod);
 
 // hooks.cpp: hooks a function of the game for the platform itself (blocks until the game's code is ready, so call
 // it from its own thread). Returns the trampoline to the original, or nullptr.

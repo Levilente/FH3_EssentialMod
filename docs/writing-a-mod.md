@@ -4,13 +4,16 @@ This walks through making a Forza Horizon 3 mod on the platform, from an empty f
 [`examples/hello_mod`](../examples/hello_mod/hello_mod.cpp); copying it is a fine way to start. Every call is described in [api.md](api.md),
 and a mod that changes the player's car should also read [car-mods.md](car-mods.md).
 
-Three complete mods are built on the platform and are worth reading:
+Complete mods built on the platform, worth reading:
 
 | Mod | Shows how to |
 |---|---|
 | [NitroSystem II](https://github.com/Levilente/NitroSystem-II---FH3) | an upgrade with an effect while driving, hooks on the car and the camera, HUD changes through `set_file`, many MODS page rows |
 | [Universal Wheel Spacers](https://github.com/Levilente/UniversalWheelSpacers_FH3) | two upgrades, one instruction hook in the car loader, `upgrade_stage_for_car`, custom icons |
 | [Airride](https://github.com/Levilente/AirRide_FH3) | an upgrade with a tuning row (`add_tuning_row`), a shop preview of its own (`upgrade_preview_stage`), controller input |
+| [Launch Control](https://github.com/Levilente/FH3_LaunchControl) | an upgrade with a tuning row, hooks into the car's physics step, controller input, **`fh3mod_shutdown`** (hot reload) |
+| [DualSense](https://github.com/Levilente/FH3_DualSense) | a controller driver as a mod: HID output, HD haptics on an audio endpoint, hooks that read the game's own car feedback, game textures changed in memory; **`fh3mod_shutdown`** with several threads |
+| [Drag and Drift Tires](https://github.com/Levilente/FH3_Drag-DriftTires), [Livery Decals](https://github.com/Levilente/LiveryMod_FH3) | mods that are only data: `add_sql`, `add_string_key`, `set_file` |
 
 ## What you need
 
@@ -150,6 +153,58 @@ Read [car-mods.md](car-mods.md). The short version: register an upgrade, and
 Don't track the driven car yourself and don't compare car models; the platform does that for every mod. Never write your part into the game's part
 set or tuning (enums 0 to 42 are the game's); the platform keeps bridge parts out of it.
 
+## Hot reload: change your mod without restarting the game
+
+Starting FH3 takes minutes; with hot reload a rebuilt mod is running a few seconds after you press a key. Turn it on in `fh3-mods\platform.ini` (the platform writes the keys on its first start):
+
+```ini
+[dev]
+HotReload=1
+ReloadKey=F9
+```
+
+Then the loop is: edit, build (the linker can now overwrite `fh3-mods\YourMod.dll` while the game runs, because the platform loaded a copy), click into the game, press **F9**. `platform.log` says what happened (`hot reload: shutting down 1.0.0` ... `hot reload: 1.0.1 is running`), and the platform beeps (two rising tones: swapped; a low one: something failed; a short one: no DLL has changed).
+
+**What your mod has to do** is export `fh3mod_shutdown`, next to `fh3mod_init`:
+
+```cpp
+static std::atomic<bool> g_stop{false};
+static HANDLE g_thread = nullptr;
+
+static DWORD WINAPI worker(LPVOID) {
+    while (!g_stop.load()) {
+        // ... the work ...
+        Sleep(8);                      // a long wait has to be interruptible: WaitForSingleObject(g_stop_event, ms)
+    }
+    return 0;
+}
+
+FH3MOD_EXPORT int fh3mod_init(const FH3ModApi* api) {
+    // ... register_mod, rows, upgrades, hooks as always ...
+    g_thread = CreateThread(nullptr, 0, worker, nullptr, 0, nullptr);
+    return 0;
+}
+
+FH3MOD_EXPORT void fh3mod_shutdown(void) {
+    g_stop.store(true);
+    if (g_thread) { WaitForSingleObject(g_thread, 3000); CloseHandle(g_thread); g_thread = nullptr; }
+    // undo what you changed yourself: memory you wrote in the game, your own patches, files you opened
+}
+```
+
+The platform then switches your hooks off itself, loads the new build and calls its `fh3mod_init`. The rules for a mod that wants to be reloadable:
+
+- **Stop every thread you started, and wait for it** (with a timeout of a few seconds), including threads that wait for the game (`wait_for_code`, `wait_for_game` can be given a timeout) and ones that sleep for long (wait on a stop event, not `Sleep(25000)`). You have 8 seconds in all.
+- **Undo what the platform doesn't know about.** The platform removes what went through its API (hooks, patches made with `patch_bytes`, rows' callbacks). Memory you wrote in the game yourself, a vectored exception handler, a window, a device handle, a changed texture: put it back in `fh3mod_shutdown`.
+- **Keep the state in your DLL's globals.** The new build is a new copy of the DLL with fresh globals; it reads its settings from your ini again. Nothing needs carrying over, and nothing can: the old build's data stays where it was.
+- **Do everything that depends on the game's data in `fh3mod_init` as usual.** Texts, files, SQL, new rows and an upgrade's stages are read by the game at startup and are not applied again on a reload (see the table in [api.md](api.md#hot-reload-api-16)): a change to one of those shows after a restart. The rest of your mod (your logic, your hooks and callbacks, the numbers you compute, the effects) is what hot reload is for.
+- **`is_reloading()`** (API 16) says the call to `fh3mod_init` is a reload, for the rare mod that needs to behave differently.
+- `fh3mod_shutdown` runs on a thread of the platform's, not a game thread, so it can't do anything that needs the game's own thread. Don't call `disable_hooks` in it: the platform does that right after it returns.
+
+A mod without `fh3mod_shutdown` is left running; the log says the new build needs a restart. Mods that only add data (SQL, files, texts) need no `fh3mod_shutdown`: the game reads that at startup and a restart is needed anyway.
+
+**It is a developer feature, and off by default** (`HotReload=0`): players never load a copy and never press the key. With it on, each reload adds the DLL's size to the game's memory (the old copy is never unloaded, so nothing can fall into unmapped code), and a bug in a `fh3mod_shutdown` can still hang or crash the game: it is code you wrote running inside the game. Don't rely on it to test a release; do that with a plain start.
+
 ## Your own files
 
 Keep your settings in `fh3-mods\<YourMod>.ini` (the existing mods do) or in a folder of your own next to `azimuth.exe`; `api->azimuth_dir` gives
@@ -172,7 +227,7 @@ The release is your DLL, nothing else: players copy it into `fh3-mods`. The plat
 need (`FH3 Mod Platform 1.0.0 or newer`) and what your ini keys do.
 
 - Tag the release `vX.Y.Z` with the same version your mod registers: the platform's update check compares the two (a leading `v` is ignored).
-- Before releasing, start the game with only your mod and check `fh3-mods\platform.log` (with your log switch on): your DLL, its version, your
+- Before releasing, start the game **without** hot reload and with only your mod and check `fh3-mods\platform.log` (with your log switch on): your DLL, its version, your
   hooks and changes, no problems. Then try it next to the other mods.
 - A repo that is private can't be checked for updates, and players can't download from it.
 

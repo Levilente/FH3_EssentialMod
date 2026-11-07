@@ -35,15 +35,16 @@ on start, and it loads every mod DLL in the `fh3-mods` folder.
 
 **For mod makers**
 
-- A C/C++ API (`include/fh3mod.h`, API version 15, documented in [`docs/api.md`](docs/api.md)): game-text edits, game-file overrides, database patches
+- A C/C++ API (`include/fh3mod.h`, API version 16, documented in [`docs/api.md`](docs/api.md)): game-text edits, game-file overrides, database patches
   (`add_sql`), string-table keys for FH3's hashed tables, Mods-page rows (On/Off, sliders, choices), hooks and byte patches, hotkeys, commands
   (`fh3mod.exe`), interfaces between mods, sessions, save snapshots, the **upgrade bridge** (`register_upgrade`) and tuning rows (`add_tuning_row`).
+- **Hot reload** (1.2.0, off by default): with `fh3-mods\platform.ini` `[dev] HotReload=1`, rebuild your mod while the game runs and press **F9**: the platform shuts the old build down (`fh3mod_shutdown`), switches its hooks off and starts the new one, with the rows, hotkeys and upgrades re-bound instead of added twice. No restart for a change to your mod's logic. See [`docs/writing-a-mod.md`](docs/writing-a-mod.md#hot-reload-change-your-mod-without-restarting-the-game).
 - **Documentation for mod makers**:
   - [`docs/api.md`](docs/api.md): every call, starting with a table of everything a mod can use and what works in FH3;
   - [`docs/writing-a-mod.md`](docs/writing-a-mod.md): from an empty folder to a release (project setup, entry point, hooks, files, icons, shipping);
   - [`docs/car-mods.md`](docs/car-mods.md): mods that change the player's car (upgrades, build-time changes, effects while driving); the platform tells
     the player's car from loaners and AI cars of the same model, so mods don't have to;
-  - [`examples/hello_mod`](examples/hello_mod/hello_mod.cpp) is the starting point, and the three mods below are complete examples.
+  - [`examples/hello_mod`](examples/hello_mod/hello_mod.cpp) is the starting point (with `fh3mod_shutdown`), and the mods listed in `writing-a-mod.md` are complete examples.
 - What is known about the game's code: [`docs/fh3-game-notes.md`](docs/fh3-game-notes.md) and [`include/fh3game.h`](include/fh3game.h).
 
 ## Requirements
@@ -75,6 +76,8 @@ Mods built on the platform ship it in their own zips, so most players never need
 | | `[Sell] UpgradePercent` | `30` | Percent of what you paid for the car's upgrades you get (0-100). |
 | | `[Sell] CreditReason` | `1` | The reason code the game records with the credit payment. |
 | `platform-units.ini` | `[units] Speed`, `Power` | `0` | The two unit rows (0 = automatic); written by the settings rows. |
+| `platform.ini` | `[dev] HotReload` | `0` | `1` loads mods from copies and lets F9 swap rebuilt DLLs in (for mod makers; see Hot reload in the docs). |
+| | `[dev] ReloadKey` | `F9` | The key (F1 to F12). |
 | `platform.ini` | `[log] Verbose` | `0` | `1` writes the platform's detailed lines to `platform.log` (hooks, shop steps, garage reads, car builds); for bug reports. Problems are always logged. |
 
 Restart the game after editing an ini by hand.

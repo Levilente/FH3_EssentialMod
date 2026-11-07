@@ -217,8 +217,14 @@ int hotkey_add(FH3Mod* m, const FH3Hotkey* k) {
     Hotkey* h = nullptr;
     {
         std::scoped_lock lk{g_mu};
-        for (const Hotkey& o : g_hotkeys)
+        for (Hotkey& o : g_hotkeys)
             if (o.mod == m && o.key == k->key) {
+                if (reload_rebinding(m)) {   // hot reload: same hotkey (and binding), the new build's callbacks
+                    o.on_press  = k->on_press;
+                    o.on_rebind = k->on_rebind;
+                    o.user      = k->user;
+                    return 1;
+                }
                 log_line(m->name, std::string("add_hotkey: there's already a hotkey called ") + k->key);
                 return 0;
             }

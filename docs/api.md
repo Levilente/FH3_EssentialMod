@@ -1,6 +1,6 @@
 # API reference
 
-Everything is in [`include/fh3mod.h`](../include/fh3mod.h). This page goes through it member by member. The FH3 Mod Platform 1.0.0 has **API version 15**.
+Everything is in [`include/fh3mod.h`](../include/fh3mod.h). This page goes through it member by member. The FH3 Mod Platform 1.2.0 has **API version 16**.
 
 The platform is a fork of the FH2 Mod Platform, and the API keeps its numbering, so a mod checks `api->api_version` the same way on both. A few parts were written for FH2's menus and files and do nothing in FH3 yet; the table says which.
 
@@ -26,6 +26,7 @@ The platform is a fork of the FH2 Mod Platform, and the API keeps its numbering,
 | Whose car is it (the player's, a loaner, an AI car) | `upgrade_car_model`, `upgrade_garage_for_car`, `upgrade_stage_for_car` | 12, 14 | yes |
 | Shop preview for effects outside the car's data | `upgrade_preview_stage`, `upgrade_shop_serial` | 15 | yes |
 | Slider rows on the car's Tuning > Springs page | `add_tuning_row` | 13 | yes |
+| Swap a rebuilt mod DLL in while the game runs (F9) | `fh3mod_shutdown` (an export), `is_reloading` | 16 | yes |
 | Pages of your own, tiles | `add_page`, `set_page_rows`, `set_page_xaml`, `set_page_tile_text`, ... | 8 | no: return 0 (FH2 menus only) |
 | Title-screen entries | `add_title_entry`, `title_started_by` | 9 | no: return 0 (FH2 menus only) |
 | Online play | `playing_online`, `offline_only` | 9 | no online play for FH3: `playing_online` is always 0 |
@@ -667,6 +668,44 @@ if (api->api_version >= 13 && api->add_tuning_row) {
     api->add_tuning_row(mod, &row);
 }
 ```
+
+## Hot reload (API 16)
+
+A developer feature: rebuild your mod, press F9 in the game, and the new build runs, without a restart. Off unless `fh3-mods\platform.ini` has
+
+```ini
+[dev]
+HotReload=1
+ReloadKey=F9
+```
+
+(`HotReload=0` and `ReloadKey=F9` are written there on the first start; `ReloadKey` is F1 to F12.) With it on, the platform loads every mod from a copy in `fh3-mods\.reload`, so the linker can overwrite `fh3-mods\<Mod>.dll` while the game runs. The key, pressed with the game in front, swaps in every mod whose DLL changed (a different last-write time or size) and which exports
+
+```c
+FH3MOD_EXPORT void fh3mod_shutdown(void);
+```
+
+For each such mod, the platform (on a thread of its own, never a game thread) does this, in order:
+
+1. copies the new DLL (an unreadable or half-written one stops here, with nothing changed; press the key again);
+2. calls the running build's `fh3mod_shutdown`, which has 8 seconds. It has to **stop everything the mod started**: its threads (and wait for them to end: a thread that sleeps or waits has to wait for a stop event too), timers, anything it patched or changed by itself, anything it set in the game's memory that should go back. It needn't switch its hooks off: that comes next;
+3. switches all the mod's hooks off (`disable_hooks(mod, NULL)`) and waits a moment for game threads that were inside its detours;
+4. loads the new copy and calls its `fh3mod_init`. `register_mod` returns the **same `FH3Mod*`**, and `is_reloading()` returns 1 for the length of this call.
+
+The old DLL is never unloaded. A thread still inside it, a hook's trampoline, a pointer someone kept: all land on mapped code. Each reload costs the DLL's size in memory.
+
+**What is swapped and what is not.** What the game reads once at startup cannot change while it runs, so:
+
+| | On a reload |
+|---|---|
+| Hooks, patches, instruction hooks | the old ones are off, the new build's `hook_*` calls make new ones |
+| Callbacks of settings rows, hotkeys, commands, upgrades (`on_stage`), tuning rows, pages, title entries | an `add_*` call with a key that exists already swaps `on_change`, `get`, `set`, `visible`, `on_press`, `fn` and `user`; nothing is added twice |
+| Interfaces (`publish_interface`) | replaced by the new build's |
+| Settings rows' labels, a new row, an upgrade's stages, prices and texts, `add_sql`, `set_file`, `add_string_key` | **not applied again**: a change to them shows after a restart (identical repeats are ignored, so calling them again is harmless) |
+
+A mod that has no `fh3mod_shutdown` is not touched: the log says the new build needs a restart. A failure leaves a line in `platform.log`: if the shutdown crashed or timed out, the old build is left as it is; if the new build fails to load or start, the mod stays off until the next launch. The platform beeps: two rising tones when everything swapped, a low one when something failed, a short one when no DLL had changed. Mods that only add data (SQL, files, texts) have nothing to swap, so they don't export `fh3mod_shutdown`.
+
+`is_reloading()` is for the rare mod that must tell the second `fh3mod_init` from the first: skip a one-time announcement, say, or use a value the player changed instead of the one in your file.
 
 ## Crash reports
 

@@ -202,8 +202,13 @@ int command_add(FH3Mod* m, const char* name, const char* help, FH3CommandFn fn, 
     bool first = false;
     {
         std::scoped_lock lk{g_mu};
-        for (const Command& c : g_commands)
+        for (Command& c : g_commands)
             if (c.mod == m && iequal(c.name, name)) {
+                if (reload_rebinding(m)) {   // hot reload: same command, the new build's function
+                    c.fn   = fn;
+                    c.user = user;
+                    return 1;
+                }
                 log_line(m->name, std::string("add_command: there's already a command called ") + name);
                 return 0;
             }

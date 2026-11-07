@@ -5,6 +5,8 @@
 //   - fh3-mods\platform.log gets a few lines from it
 //   - Home > MODS > Installed mods > HelloMod has an On/Off row
 //   - once the game is mapped, it logs where
+//   - with fh3-mods\platform.ini [dev] HotReload=1 you can rebuild it while the game runs and press F9: fh3mod_shutdown stops its
+//     thread, and the new build starts in its place (see docs/writing-a-mod.md, Hot reload)
 #include "fh3mod.h"
 
 #include <windows.h>
@@ -16,13 +18,18 @@ namespace {
 const FH3ModApi* g_api = nullptr;
 FH3Mod* g_mod          = nullptr;
 
+HANDLE g_stop   = nullptr;   // set by fh3mod_shutdown: the thread's reason to end
+HANDLE g_thread = nullptr;
+
 DWORD WINAPI wait_for_game(LPVOID) {
-    // Anything slow goes on your own thread, never in fh3mod_init.
-    if (void* base = g_api->wait_for_game(0xFFFFFFFFu)) {
+    // Anything slow goes on your own thread, never in fh3mod_init. A thread that waits for something must wait for g_stop too,
+    // so fh3mod_shutdown can end it.
+    if (void* base = g_api->wait_for_game(2000)) {
         char line[96];
         std::snprintf(line, sizeof line, "the game is mapped at %p", base);
         g_api->log(g_mod, line);
     }
+    WaitForSingleObject(g_stop, 1000);
     return 0;
 }
 
@@ -42,7 +49,7 @@ FH3MOD_EXPORT int fh3mod_init(const FH3ModApi* api) {
     g_mod                 = api->register_mod(&info);
     if (!g_mod) return 1;
 
-    api->log(g_mod, "hello from HelloMod");
+    api->log(g_mod, api->api_version >= 16 && api->is_reloading() ? "hello again, from a hot reload" : "hello from HelloMod");
 
     // A row on the MODS page (API 4): the mod keeps the value, the platform
     // shows it and calls on_change when the player flips it.
@@ -57,6 +64,22 @@ FH3MOD_EXPORT int fh3mod_init(const FH3ModApi* api) {
         api->add_setting(g_mod, &row);
     }
 
-    if (HANDLE t = CreateThread(nullptr, 0, wait_for_game, nullptr, 0, nullptr)) CloseHandle(t);
+    g_stop   = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    g_thread = CreateThread(nullptr, 0, wait_for_game, nullptr, 0, nullptr);
     return 0;
+}
+
+// Optional (API 16): lets the platform swap this DLL for a rebuilt one while the game runs. Stop everything the mod started and wait
+// for it to end; the platform switches the hooks off afterwards and calls the new build's fh3mod_init.
+FH3MOD_EXPORT void fh3mod_shutdown(void) {
+    if (g_stop) SetEvent(g_stop);
+    if (g_thread) {
+        WaitForSingleObject(g_thread, 5000);
+        CloseHandle(g_thread);
+        g_thread = nullptr;
+    }
+    if (g_stop) {
+        CloseHandle(g_stop);
+        g_stop = nullptr;
+    }
 }

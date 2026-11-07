@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.0
+
+- **Hot reload for mod makers** (API 16, off by default). With `fh3-mods\platform.ini` `[dev] HotReload=1` (and `ReloadKey=F9`), the platform loads every mod from a copy in `fh3-mods\.reload`, so a build can overwrite `fh3-mods\<Mod>.dll` while the game runs, and **F9** swaps in the mods whose DLL changed and which export `fh3mod_shutdown`: the platform calls it (8 seconds, on its own thread), switches the mod's hooks off, loads the new copy and runs its `fh3mod_init` again. `register_mod` returns the same handle; `add_setting`, `add_hotkey`, `add_command`, `register_upgrade`, `add_tuning_row`, `add_page` and `add_title_entry` with a key that exists already swap the callbacks instead of adding a second entry; `add_sql` ignores a statement it already has. The old DLL stays loaded for good, so nothing can run into unmapped code. What the game reads once at startup (texts, files, SQL, a row's label, an upgrade's stages) is not applied again. `is_reloading()` tells the second start from the first. A beep says how it went; `platform.log` says why. Players never see any of it: with `HotReload=0` mods load from `fh3-mods` as before. See `docs/writing-a-mod.md`.
+- `examples/hello_mod` shows `fh3mod_shutdown`; the docs list the mods built on the platform (Launch Control, DualSense, Drag and Drift Tires and Livery Decals now too).
+
 ## 1.1.1
 
 - Extra Options (and any other DLL next to azimuth.exe) reads the controller too: the minimap follows the right stick, the garage's Manufacturer (View) button works with a DualSense.

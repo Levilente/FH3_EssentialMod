@@ -115,6 +115,10 @@ bool log_verbose() {
 fs::path azimuth_dir() { return g_azimuth; }
 fs::path game_mount() { return g_game; }
 
+// Hot reload (API 16): the mod whose fh3mod_init runs again right now.
+std::atomic<FH3Mod*> g_reloading{nullptr};
+bool reload_rebinding(const FH3Mod* m) { return m && g_reloading.load() == m; }
+
 namespace {
 
 
@@ -470,6 +474,16 @@ bool remembered_offline_only(const std::wstring& dll);
 
 FH3Mod* api_register(const FH3ModInfo* info) {
     if (!info || info->size < offsetof(FH3ModInfo, check_updates) + sizeof(int) || !info->name) return nullptr;
+    if (FH3Mod* again = g_reloading.load(); again && again->name == info->name) {
+        // the same mod, started again by a hot reload: same handle, fresh details
+        std::scoped_lock lk{g_mu};
+        again->version         = info->version ? info->version : "";
+        again->repo            = info->github_repo ? info->github_repo : "";
+        again->platform_version = info->platform_version ? info->platform_version : "";
+        if (info->size >= offsetof(FH3ModInfo, description) + sizeof(const char*) && info->description)
+            again->description = info->description;
+        return again;
+    }
     auto m             = std::make_unique<FH3Mod>();
     m->name            = info->name;
     m->version         = info->version ? info->version : "";
@@ -590,6 +604,9 @@ void api_clear_file(FH3Mod* m, const char* path) { clear_file(m, path); }
 void api_add_sql(FH3Mod* m, const char* sql) {
     if (!m || !sql || !*sql) return;
     std::scoped_lock lk{g_mu};
+    if (m->reloaded)   // the second start of a hot-reloaded mod adds the same statements again
+        for (const std::string& have : m->sql)
+            if (have == sql) return;
     m->sql.emplace_back(sql);
 }
 
@@ -604,6 +621,7 @@ int32_t api_upgrade_garage_for_car(int32_t c, uint32_t f) { return upgrades_gara
 int api_upgrade_stage_for_car(FH3Mod*, int h, int32_t c) { return upgrades_stage_for_car(h, c); }
 int api_upgrade_preview_stage(FH3Mod*, int h) { return upgrades_preview_stage(h); }
 uint32_t api_upgrade_shop_serial() { return upgrades_shop_serial(); }
+int api_is_reloading() { return g_reloading.load() ? 1 : 0; }
 void api_upgrade_import(FH3Mod*, int h, int32_t g, int32_t o, int s, uint32_t m) { upgrades_import(h, g, o, s, m); }
 
 void api_clear_sql(FH3Mod* m) {
@@ -825,6 +843,232 @@ int call_init(FH3ModInitFn init, const FH3ModApi* api, DWORD* code) {
     }
 }
 
+
+// ---- hot reload (a developer feature, API 16) ------------------------------------------
+//
+// fh3-mods\platform.ini [dev] HotReload=1: every mod is loaded from a copy in fh3-mods\.reload, so the build can overwrite
+// fh3-mods\<Mod>.dll while the game runs, and F9 (ReloadKey) swaps in the mods whose DLL changed. Only a mod that exports
+// fh3mod_shutdown takes part. The sequence, per changed mod, on a thread of the platform's own:
+//   1. the new DLL is copied (a half-written or unreadable one stops here, and nothing has changed yet);
+//   2. fh3mod_shutdown of the running build is called (SEH, 8 seconds at most): the mod stops its threads and undoes what it did by itself;
+//   3. the mod's hooks are switched off, and in-flight calls get a moment to leave its code;
+//   4. the new copy is loaded and its fh3mod_init runs, with register_mod giving back the same handle, and the add_* calls with
+//      a key that exists already swapping the callbacks (reload_rebinding).
+// The old DLL is never unloaded: a thread still inside it, a hook trampoline, a callback no one rebinds, all still land on mapped
+// code. It costs the DLL's size in memory per reload, in a developer's game.
+
+struct Slot {
+    std::wstring file;       // the name in fh3-mods
+    HMODULE mod = nullptr;   // the build running now
+    fs::path src;            // fh3-mods\<file>
+    ULONGLONG stamp = 0;     // last-write time and size of src when that build was copied
+    ULONGLONG size  = 0;
+    int gen         = 0;
+};
+std::vector<Slot> g_slots;   // written by the loader thread, then only by the reload thread
+bool g_hot = false;
+UINT g_hot_key = VK_F9;
+std::mutex g_reload_mu;
+
+bool file_stamp(const fs::path& p, ULONGLONG* stamp, ULONGLONG* size) {
+    WIN32_FILE_ATTRIBUTE_DATA a{};
+    if (!GetFileAttributesExW(p.c_str(), GetFileExInfoStandard, &a)) return false;
+    *stamp = (static_cast<ULONGLONG>(a.ftLastWriteTime.dwHighDateTime) << 32) | a.ftLastWriteTime.dwLowDateTime;
+    *size  = (static_cast<ULONGLONG>(a.nFileSizeHigh) << 32) | a.nFileSizeLow;
+    return true;
+}
+
+// fh3-mods\.reload\<name>.<process id>.<generation>.dll; empty if the copy failed.
+fs::path hot_copy(const fs::path& src, int gen) {
+    const fs::path dir = g_azimuth / "fh3-mods" / ".reload";
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    const fs::path dst = dir / (src.stem().wstring() + L"." + std::to_wstring(GetCurrentProcessId()) + L"." +
+                                std::to_wstring(gen) + L".dll");
+    if (!CopyFileW(src.c_str(), dst.c_str(), FALSE)) return {};
+    return dst;
+}
+
+void hot_settings() {
+    const std::wstring ini = (g_azimuth / "fh3-mods" / "platform.ini").wstring();
+    wchar_t buf[16] = L"";
+    GetPrivateProfileStringW(L"dev", L"HotReload", L"", buf, 16, ini.c_str());
+    if (!buf[0]) WritePrivateProfileStringW(L"dev", L"HotReload", L"0", ini.c_str());
+    g_hot = buf[0] && buf[0] != L'0';
+    wchar_t key[16] = L"";
+    GetPrivateProfileStringW(L"dev", L"ReloadKey", L"", key, 16, ini.c_str());
+    if (!key[0]) WritePrivateProfileStringW(L"dev", L"ReloadKey", L"F9", ini.c_str());
+    if ((key[0] == L'F' || key[0] == L'f') && key[1]) {
+        const int n = _wtoi(key + 1);
+        if (n >= 1 && n <= 12) g_hot_key = VK_F1 + n - 1;
+    }
+    if (g_hot) {
+        // copies of earlier launches (the ones still loaded by another game can't be deleted, and stay)
+        std::error_code ec;
+        for (const auto& e : fs::directory_iterator(g_azimuth / "fh3-mods" / ".reload", ec))
+            if (e.is_regular_file(ec)) fs::remove(e.path(), ec);
+    }
+}
+
+struct ShutdownJob {
+    FH3ModShutdownFn fn;
+    HANDLE done;
+    DWORD code;
+};
+
+DWORD WINAPI shutdown_thread(LPVOID p) {
+    auto* j = static_cast<ShutdownJob*>(p);
+    __try {
+        j->fn();
+    } __except (j->code = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+    }
+    SetEvent(j->done);
+    return 0;
+}
+
+enum class Swap { unchanged, done, skipped, failed };
+
+Swap reload_one(Slot& sl) {
+    const std::string nm = narrow(sl.file);
+    ULONGLONG stamp = 0, size = 0;
+    if (!file_stamp(sl.src, &stamp, &size) || (stamp == sl.stamp && size == sl.size)) return Swap::unchanged;
+    FH3Mod* m = nullptr;
+    {
+        std::scoped_lock lk{g_mu};
+        for (const auto& x : g_mods)
+            if (lower_w(x->dll) == lower_w(sl.file)) m = x.get();
+    }
+    if (!m) {
+        plog(nm + " changed, but it isn't a running platform mod; restart the game to load the new build");
+        sl.stamp = stamp, sl.size = size;
+        return Swap::skipped;
+    }
+    const auto shutdown = reinterpret_cast<FH3ModShutdownFn>(GetProcAddress(sl.mod, "fh3mod_shutdown"));
+    if (!shutdown) {
+        log_line(m->name, nm + " changed, but the running build has no fh3mod_shutdown, so it can't be swapped while the game runs "
+                          "(restart the game to load the new build; see docs/writing-a-mod.md, Hot reload)");
+        sl.stamp = stamp, sl.size = size;
+        return Swap::skipped;
+    }
+    if (exports_init(sl.src) != 1) {
+        log_line(m->name, "hot reload: the new " + nm + " has no fh3mod_init (still being linked?); nothing changed");
+        return Swap::failed;
+    }
+    const fs::path copy = hot_copy(sl.src, sl.gen + 1);
+    if (copy.empty()) {
+        log_line(m->name, "hot reload: couldn't copy the new " + nm + " (still being written?); nothing changed. Press the key again");
+        return Swap::failed;
+    }
+    // from here on the running build is shut down: if the new one doesn't start, the mod stays off until the next launch
+    log_line(m->name, "hot reload: shutting down " + m->version);
+    // on the heap: if the shutdown outlives the 8 seconds, its thread still touches this when it finally ends
+    auto* job = new ShutdownJob{shutdown, CreateEventW(nullptr, TRUE, FALSE, nullptr), 0};
+    HANDLE th = job->done ? CreateThread(nullptr, 0, shutdown_thread, job, 0, nullptr) : nullptr;
+    if (!th) {
+        log_line(m->name, "hot reload: couldn't start the shutdown; nothing changed");
+        if (job->done) CloseHandle(job->done);
+        delete job;
+        return Swap::failed;
+    }
+    const bool in_time = WaitForSingleObject(job->done, 8000) == WAIT_OBJECT_0;
+    CloseHandle(th);
+    if (!in_time) {
+        log_line(m->name, "hot reload: fh3mod_shutdown didn't return within 8 seconds; the old build stays as it is (restart the game "
+                          "to load the new one). Is a thread of the mod still waiting for something?");
+        return Swap::failed;   // job is left to the thread
+    }
+    const DWORD shutdown_code = job->code;
+    CloseHandle(job->done);
+    delete job;
+    if (shutdown_code) {
+        char b[16];
+        std::snprintf(b, sizeof b, "%08lX", shutdown_code);
+        log_line(m->name, std::string("hot reload: fh3mod_shutdown crashed (exception 0x") + b + "); the mod is half shut down, restart the game");
+        return Swap::failed;
+    }
+    g_api.disable_hooks(m, nullptr);
+    Sleep(250);   // game threads that were inside the mod's detours leave them (the old code stays mapped anyway)
+    HMODULE h = LoadLibraryExW(copy.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+    if (!h) {
+        log_line(m->name, "hot reload: Windows couldn't load the new build (error " + std::to_string(GetLastError()) +
+                              "); the mod is off until the game restarts");
+        return Swap::failed;
+    }
+    const auto init = reinterpret_cast<FH3ModInitFn>(GetProcAddress(h, "fh3mod_init"));
+    if (!init) {
+        log_line(m->name, "hot reload: the new build has no fh3mod_init; the mod is off until the game restarts");
+        return Swap::failed;
+    }
+    m->reloaded = true;
+    {
+        std::scoped_lock lk{g_mu};
+        g_current_dll = sl.file;
+    }
+    g_reloading = m;
+    DWORD code   = 0;
+    const int rc = call_init(init, &g_api, &code);
+    g_reloading  = nullptr;
+    {
+        std::scoped_lock lk{g_mu};
+        g_current_dll.clear();
+    }
+    const auto* base = reinterpret_cast<const char*>(h);
+    const auto* nt   = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
+    add_crash_dll({sl.file, base, nt->OptionalHeader.SizeOfImage});
+    sl.mod = h, sl.stamp = stamp, sl.size = size, ++sl.gen;
+    if (code || rc) {
+        char b[16];
+        std::snprintf(b, sizeof b, "%08lX", code);
+        log_line(m->name, code ? std::string("hot reload: fh3mod_init of the new build crashed (exception 0x") + b + "); the mod may be half started"
+                               : "hot reload: fh3mod_init of the new build returned " + std::to_string(rc));
+        return Swap::failed;
+    }
+    log_line(m->name, "hot reload: " + m->version + " is running" +
+                          (GetProcAddress(h, "fh3mod_shutdown") ? "" : " (the new build has no fh3mod_shutdown: the next change needs a restart)"));
+    return Swap::done;
+}
+
+void reload_all() {
+    if (!g_reload_mu.try_lock()) return;   // one at a time
+    std::scoped_lock lk{std::adopt_lock, g_reload_mu};
+    if (WaitForSingleObject(g_mods_ready, 0) != WAIT_OBJECT_0) {
+        plog("hot reload: the mods are still starting");
+        return;
+    }
+    int done = 0, skipped = 0, failed = 0;
+    for (Slot& sl : g_slots) switch (reload_one(sl)) {
+        case Swap::done: ++done; break;
+        case Swap::skipped: ++skipped; break;
+        case Swap::failed: ++failed; break;
+        default: break;
+    }
+    if (!done && !skipped && !failed) {
+        plog("hot reload: no mod DLL has changed since it was loaded");
+        Beep(660, 60);
+        return;
+    }
+    plog("hot reload: " + std::to_string(done) + " reloaded" + (skipped ? ", " + std::to_string(skipped) + " need a restart" : "") +
+         (failed ? ", " + std::to_string(failed) + " failed" : ""));
+    if (failed) Beep(300, 250);
+    else {
+        Beep(1000, 70);
+        Beep(1400, 70);
+    }
+}
+
+DWORD WINAPI reload_watch(LPVOID) {
+    bool down = false;
+    for (;;) {
+        Sleep(20);
+        DWORD pid = 0;
+        HWND w    = GetForegroundWindow();
+        const bool front = w && GetWindowThreadProcessId(w, &pid) && pid == GetCurrentProcessId();
+        const bool now   = front && (GetAsyncKeyState(static_cast<int>(g_hot_key)) & 0x8000) != 0;
+        if (now && !down) std::thread(reload_all).detach();
+        down = now;
+    }
+}
+
 DWORD WINAPI load_mods(LPVOID) {
     g_loader_thread = GetCurrentThreadId();
     g_mods_ready    = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -851,6 +1095,8 @@ DWORD WINAPI load_mods(LPVOID) {
         SetEvent(g_mods_ready);
         return 0;
     }
+    hot_settings();
+    if (g_hot) plog("hot reload is on (fh3-mods\\platform.ini [dev]): mods are loaded from fh3-mods\\.reload, and F9 swaps in rebuilt DLLs that export fh3mod_shutdown");
     start_media_overrides();
     start_intro_skip();
     start_input();
@@ -941,7 +1187,19 @@ DWORD WINAPI load_mods(LPVOID) {
             g_found.back().loaded = true; // as far as the MODS tab goes, which only FH2 shows
             continue;
         }
-        if (HMODULE h = LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH)) {
+        std::wstring load_path = path;
+        if (g_hot) {
+            const fs::path copy = hot_copy(path, 0);
+            if (!copy.empty()) load_path = copy.wstring();
+            else plog("hot reload: couldn't copy " + narrow(f) + "; it is loaded from fh3-mods and can't be swapped");
+        }
+        if (HMODULE h = LoadLibraryExW(load_path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH)) {
+            if (g_hot && load_path != path) {
+                Slot sl;
+                sl.file = f, sl.mod = h, sl.src = path;
+                file_stamp(sl.src, &sl.stamp, &sl.size);
+                g_slots.push_back(std::move(sl));
+            }
             loaded.push_back({f, h});
             {
                 std::scoped_lock lk{g_mu};
@@ -1058,6 +1316,7 @@ DWORD WINAPI load_mods(LPVOID) {
     build_database();
     settings_start(&g_api);
     plog(std::to_string(loaded.size()) + " mod(s) loaded");
+    if (g_hot && !g_slots.empty()) CreateThread(nullptr, 0, reload_watch, nullptr, 0, nullptr);
     write_mods_page_rows();
     start_save_snapshot();
     write_session_status();
@@ -1363,6 +1622,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
                 g_api.upgrade_stage_for_car = api_upgrade_stage_for_car;
                 g_api.upgrade_preview_stage = api_upgrade_preview_stage;
                 g_api.upgrade_shop_serial = api_upgrade_shop_serial;
+                g_api.is_reloading      = api_is_reloading;
                 return load_mods(nullptr);
             },
             nullptr, 0, nullptr))

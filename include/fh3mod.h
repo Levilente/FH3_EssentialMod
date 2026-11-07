@@ -33,7 +33,7 @@
 extern "C" {
 #endif
 
-#define FH3MOD_API_VERSION 15
+#define FH3MOD_API_VERSION 16
 
 #ifdef __cplusplus
 #define FH3MOD_EXPORT extern "C" __declspec(dllexport)
@@ -608,6 +608,25 @@ typedef struct FH3ModApi {
        gives no sign when the player backs out of the list (upgrade_preview_stage stays), so a mod that ends its preview itself (on the
        back button) keeps it ended until this changes: the next hover. */
     uint32_t (*upgrade_shop_serial)(void);
+
+    /* ==== API version 16 (platform 1.2.0): check api_version >= 16 ===== */
+
+    /* ---- Hot reload (a developer feature) ----------------------------------
+       With fh3-mods\platform.ini [dev] HotReload=1, the platform loads every mod from a copy, so a rebuilt DLL can replace the
+       file while the game runs, and F9 swaps in the DLLs that changed. A mod takes part by exporting
+
+           FH3MOD_EXPORT void fh3mod_shutdown(void);
+
+       which the platform calls (on a thread of its own, never a game thread) before it loads the new build. It has to stop what the
+       mod started: its threads (and wait for them to end), timers, anything it patched by itself. The platform switches the mod's
+       hooks off after it returns, loads the new DLL and calls its fh3mod_init again. The old DLL stays in memory for good (code
+       that is still running in it, or a pointer someone kept, never lands on unmapped memory). A mod without fh3mod_shutdown is
+       left running as it is and needs a restart to change.
+       During that second fh3mod_init, register_mod returns the same handle, and calls that add rows, pages, hotkeys, commands,
+       upgrades or tuning rows with a key that exists already swap the callbacks and `user` pointers of that entry (nothing is
+       added twice); the data the game reads at startup (text, files, SQL, the rows' labels, upgrade stages and prices) is
+       not applied again: a change to it shows after a restart. is_reloading() tells the second run from the first. */
+    int (*is_reloading)(void);   /* 1 while your fh3mod_init runs as a reload, else 0 */
 } FH3ModApi;
 
 #define FH3MOD_CAR_MAKE_DRIVEN 1u   /* upgrade_garage_for_car: make the car found the driven car */
@@ -823,6 +842,7 @@ struct FH3PageRow {
 
 /* What a mod exports. */
 typedef int (*FH3ModInitFn)(const FH3ModApi* api);
+typedef void (*FH3ModShutdownFn)(void);   /* optional, API 16: lets the mod be hot-reloaded (see is_reloading) */
 
 #ifdef __cplusplus
 }

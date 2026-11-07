@@ -967,6 +967,11 @@ int upgrades_register(FH3Mod* mod, const FH3UpgradeDef* d, const std::function<v
     const int n = g_count.load();
     for (int i = 0; i < n; ++i)
         if (g_up[i]->id == d->id) {
+            if (reload_rebinding(mod)) {   // hot reload: same upgrade (stages, prices and texts are the game's from startup), the new build's callback
+                g_up[i]->cb   = d->on_stage;
+                g_up[i]->user = d->user;
+                return g_up[i]->slot;
+            }
             log_line(mod->name, "register_upgrade: \"" + std::string(d->id) + "\" is registered already");
             return g_up[i]->slot;
         }
