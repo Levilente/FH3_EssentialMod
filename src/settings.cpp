@@ -1851,7 +1851,7 @@ std::string tune_row_xaml(std::size_t i, const TuneRow& r) {
     // header ItemsControl as its DataContext (the dark panel style the game's header bands set), and its visibility reads the
     // view-model through the page instead.
     x += "                                <ListBoxItem Style=\"{StaticResource A_Style_ListBoxItem_List_Tuning}\" Focusable=\"False\" DataContext=\"{Binding ElementName=FH3Mod_Tune_Head_" + n + "}\"\r\n"
-         "                                             Visibility=\"{Binding DataContext.Tuning.FH3Mod_TuneVis_" + n + ", RelativeSource={RelativeSource AncestorType=Page}, Converter={StaticResource FH3Mod_TuneShow}}\">\r\n"
+         "                                             Visibility=\"{Binding Visibility, ElementName=FH3Mod_Tune_Row_" + n + "}\">\r\n"
          "                                <ItemsControl x:Name=\"FH3Mod_Tune_Head_" + n + "\" Style=\"{StaticResource A_Style_ItemsControl_1x3_TuningSpaced_Header}\">\r\n"
          "                                    <local:FZTextBlock Style=\"{StaticResource A_Style_FZTextBlock_Tune_ItemTitle}\" Text=\"" + xml_escape(head) + "\" HorizontalAlignment=\"Left\" Grid.Column=\"0\" />\r\n"
          "                                    <local:FZTextBlock Style=\"{StaticResource A_Style_FZTextBlock_Tune_ItemTitle}\" Text=\"" + fmt(r.fmin) + "\" HorizontalAlignment=\"Left\" Grid.Column=\"1\" />\r\n"
@@ -1859,7 +1859,7 @@ std::string tune_row_xaml(std::size_t i, const TuneRow& r) {
          "                                    <local:FZTextBlock Style=\"{StaticResource A_Style_FZTextBlock_Tune_ItemTitle}\" Text=\"" + xml_escape(unit) + "\" HorizontalAlignment=\"Right\" Grid.Column=\"2\" />\r\n"
          "                                </ItemsControl>\r\n"
          "                                </ListBoxItem>\r\n";
-    x += "                                <ListBoxItem Style=\"{StaticResource A_Style_ListBoxItem_List_Tuning}\" Tag=\"" + xml_escape(r.help) + "\"\r\n"
+    x += "                                <ListBoxItem x:Name=\"FH3Mod_Tune_Row_" + n + "\" Style=\"{StaticResource A_Style_ListBoxItem_List_Tuning}\" Tag=\"" + xml_escape(r.help) + "\"\r\n"
          "                                             " + vis + ">\r\n"
          "                                <ItemsControl Style=\"{StaticResource A_Style_ItemsControl_1x3_TuningSpaced}\" Tag=\"" + xml_escape(r.help) + "\">\r\n"
          "                                    <local:FZTextBlock Style=\"{StaticResource A_Style_FZTextBlock_Tune_ItemLabel}\"\r\n"
