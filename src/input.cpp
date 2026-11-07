@@ -470,7 +470,8 @@ void hid_parse(const BYTE* b, DWORD n, bool bt, Virt& v) {
     if (b1 & 0x20) btn |= X_START;
     if (b1 & 0x40) btn |= X_LS;
     if (b1 & 0x80) btn |= X_RS;
-    auto st = [](BYTE c) { return static_cast<SHORT>((static_cast<int>(c) - 128) * 257); };
+    // 0..255 around 128 onto -32768..32767 (a plain *257 wraps at 0 and turns a full left into a full right)
+    auto st = [](BYTE c) { const int d = static_cast<int>(c) - 128; return static_cast<SHORT>(d < 0 ? d * 256 : d * 258); };
     v.buttons = btn;
     v.lt = l2;
     v.rt = r2;

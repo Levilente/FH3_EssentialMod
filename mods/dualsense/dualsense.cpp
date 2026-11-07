@@ -352,7 +352,7 @@ uint32_t crc32(uint32_t crc, const BYTE* p, size_t n) {
 }
 
 bool ds_write(Ds& d, const BYTE common[47]) {
-    BYTE buf[128] = {};
+    BYTE buf[600] = {};   // over Bluetooth the HID caps give the largest output report (547 bytes); report 0x31 sits at its start
     if (d.outLen > sizeof buf) return false;
     if (!d.bt) {
         buf[0] = 0x02;
@@ -540,7 +540,7 @@ void send_output(Ds& d, bool neutral) {
         g_last.write = now;
         if (full) g_last.full = now;
     } else {
-        say("controller: gone (write error %lu)", GetLastError());
+        say("controller: gone (write failed, error %lu, report %u bytes)", GetLastError(), d.outLen);
         ds_close(d);
     }
 }
