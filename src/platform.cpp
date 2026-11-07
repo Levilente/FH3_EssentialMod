@@ -853,6 +853,7 @@ DWORD WINAPI load_mods(LPVOID) {
     }
     start_media_overrides();
     start_intro_skip();
+    start_input();
 
     struct Loaded {
         std::wstring file;

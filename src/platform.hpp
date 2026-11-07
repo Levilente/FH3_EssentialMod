@@ -64,6 +64,7 @@ void* upgrades_live_db();
 void sellcar_start();
 // intro_skip.cpp: the start-up video is skipped.
 void start_intro_skip();
+void start_input(); // input.cpp: other controllers (DualSense, ...) for the mods' XInput reads
 // mods_page.cpp: takes over the MODS tile on the Home tab.
 void start_mods_page();
 

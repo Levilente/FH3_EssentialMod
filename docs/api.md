@@ -489,7 +489,7 @@ typedef struct FH3Hotkey {
 
 A key on the keyboard, a chord on the controller or both, that call `on_press` once per press: a key that writes "the problem is here" to your log, or a live switch while you test something.
 
-- **Only while the game is in front.** The platform polls the keyboard (`GetAsyncKeyState`) and the controllers (XInput, from System32) every 15 ms while Azimuth's window has the focus. It never takes a key from other programs (no `RegisterHotKey`), and the game still gets every key and button, so pick ones that do nothing harmful in game: an F-key, or LB+RB with a face button. The modifiers have to match exactly, so Ctrl+F5 doesn't set off a hotkey on F5.
+- **Only while the game is in front.** The platform polls the keyboard (`GetAsyncKeyState`) and the controllers (XInput, from System32; since 1.1.0 other gamepads such as a DualSense are added to what `XInputGetState` returns to mods, see below) every 15 ms while Azimuth's window has the focus. It never takes a key from other programs (no `RegisterHotKey`), and the game still gets every key and button, so pick ones that do nothing harmful in game: an F-key, or LB+RB with a face button. The modifiers have to match exactly, so Ctrl+F5 doesn't set off a hotkey on F5.
 - **`on_press`** runs on the platform's hotkey thread, not the game's. Keep it short, and hand anything that touches the game to a hook. If it crashes, the log says so and the next press calls it again.
 - **The Mods page.** Each hotkey gets two choice rows on your mod's settings page (Home > MODS > Installed mods): "<label>: key" (Off, F1 to F12, Ctrl+F1 to F12, or your own binding if it's none of those) and "<label>: controller" (Off, or LB+RB with Y, X, B, A or a d-pad direction, or your own chord). A change there takes effect straight away and calls `on_rebind` with the new binding. The platform doesn't keep bindings: save them in your settings and pass them in next time, as with your rows.
 - **When.** Add hotkeys from `fh3mod_init`, so their rows show (rows added later only show from the next launch). It returns 1 if the hotkey was added, 0 if not, and the log says why.
@@ -679,3 +679,8 @@ These need no code from you. If the game crashes, the platform writes `fh3-mods\
 - **`fh3-mods\platform-session.json`** says `crashed`, with the report's name (see Sessions).
 
 Wine's dbghelp writes the dumps too; whether it honours the mods' data and added ranges there hasn't been checked yet.
+
+
+## Controllers other than Xbox pads (platform 1.1.0)
+
+A mod that reads `XInputGetState` itself (from `xinput1_4.dll`, as the example mods do) also sees the PC's other gamepads: the platform reads them (Windows.Gaming.Input RawGameController) and hooks `XInputGetState` for callers that are DLLs in `fh3-mods` (and its own hotkeys). The other pad's buttons are OR-ed into a real XInput pad's, or it shows up as pad 0 when XInput has none. Sony pads use their known layout (Square/Cross/Circle/Triangle as X/A/B/Y, Create/Options as Back/Start); other pads use the usual HID order (A, B, X, Y, LB, RB, Back, Start, LS, RS); the right stick and the triggers are learned from the resting axes. The game and every other caller get XInput's answer unchanged. Nothing to do in a mod. `XInputSetState` (rumble) is not routed to these pads. Settings in `fh3-mods\platform.ini`: `[input] Enabled=0` (all off), `Raw=0` (no controller reader), `Ignore=VVVV:PPPP,...` (hex vendor and product ids to skip).
