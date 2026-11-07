@@ -79,7 +79,7 @@ bool take_snapshot(uint8_t* t) {
             else if (is_power(id)) s.push_back({sys, k, id, fmt, label, true});
         }
     }
-    {
+    if (log_verbose()) {
         char b[160];
         std::snprintf(b, sizeof b, "unit table at %p: %zu speed/power rows", static_cast<void*>(t), s.size());
         vlog_line("units", b);
@@ -154,7 +154,7 @@ void worker() {
     int idle  = 0;
     for (;;) {
         uint8_t* t = table();
-        if (idle < 6 || (idle % 30) == 0) {
+        if ((idle < 6 || (idle % 30) == 0) && log_verbose()) {   // diagnostics only with the detailed log
             char b[120];
             std::snprintf(b, sizeof b, "table pointer %p, readable %d, snapshot %d", static_cast<void*>(t), t && readable(t, 64) ? 1 : 0, have ? 1 : 0);
             vlog_line("units", b);
